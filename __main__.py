@@ -78,13 +78,15 @@ def main():
 
     # 7. Run main loop
     demos = {"Calibration": cal_demo, "Tracking": tracking_demo}
-    loop = MainLoop(camera_mgr, demos)
+    loop = MainLoop(camera_mgr, demos, bridge=bridge, arm_thread=arm_thread)
 
     print()
     print("Controls:")
     print("  Click tab bar    — switch tab")
     print("  [q]              — quit")
     print("  [g/e/r]          — GUI / Physical DVS / Physical RGB mode")
+    print("  [h]              — arm go home")
+    print("  [w]              — arm go center (draw position)")
     print("  [space]          — toggle tracking")
     print("  [c]              — clear canvas")
     print("  [v]              — cycle layout (GUI mode)")

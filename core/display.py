@@ -424,6 +424,95 @@ def sub_tab_from_click(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Arm control buttons (HOME / DRAW)
+# ---------------------------------------------------------------------------
+
+ARM_BTN_W = 56
+ARM_BTN_GAP = 6
+ARM_BTN_PAD = 10
+ARM_BUTTONS = ["HOME", "DRAW"]
+
+
+def arm_buttons_width() -> int:
+    """Total pixel width of the arm-button area (including separator gap)."""
+    n = len(ARM_BUTTONS)
+    return ARM_BTN_PAD * 2 + n * ARM_BTN_W + max(0, n - 1) * ARM_BTN_GAP
+
+
+def render_arm_buttons(
+    at_home: bool,
+    width: int,
+    height: int = TAB_BAR_HEIGHT,
+) -> np.ndarray:
+    """Render HOME / DRAW buttons for the right side of the tab bar.
+
+    Args:
+        at_home: True → HOME highlighted (green); False → DRAW highlighted (orange).
+        width: pixel width of the button area.
+        height: pixel height.
+    """
+    bar = np.full((height, width, 3), (240, 240, 240), dtype=np.uint8)
+
+    # Vertical separator on the left edge
+    cv2.line(bar, (2, 6), (2, height - 6), (180, 180, 180), 1)
+
+    btn_x = ARM_BTN_PAD
+    y1, y2 = 6, height - 6
+
+    for label in ARM_BUTTONS:
+        x1, x2 = btn_x, btn_x + ARM_BTN_W
+
+        if label == "HOME" and at_home:
+            # At home → HOME green highlight
+            cv2.rectangle(bar, (x1, y1), (x2, y2), (0, 180, 80), -1)
+            text_color = (255, 255, 255)
+        elif label == "DRAW" and not at_home:
+            # Working → DRAW orange highlight
+            cv2.rectangle(bar, (x1, y1), (x2, y2), (0, 140, 255), -1)
+            text_color = (255, 255, 255)
+        else:
+            # Inactive: white bg + gray border
+            cv2.rectangle(bar, (x1, y1), (x2, y2), (255, 255, 255), -1)
+            cv2.rectangle(bar, (x1, y1), (x2, y2), (180, 180, 180), 1)
+            text_color = (60, 60, 60)
+
+        ts = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)[0]
+        tx = x1 + (ARM_BTN_W - ts[0]) // 2
+        ty = (height + ts[1]) // 2 - 2
+        cv2.putText(bar, label, (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, text_color, 1, cv2.LINE_AA)
+
+        btn_x = x2 + ARM_BTN_GAP
+
+    return bar
+
+
+def arm_button_from_click(
+    x: int, y: int,
+    frame_width: int,
+    reserved_right: int,
+) -> Optional[str]:
+    """Return "HOME" or "DRAW" if click hits an arm button, else None.
+
+    Args:
+        reserved_right: total width of arm-button area (from render_arm_buttons).
+    """
+    if y >= TAB_BAR_HEIGHT or reserved_right <= 0:
+        return None
+    area_start = frame_width - reserved_right
+    if x < area_start:
+        return None
+    local_x = x - area_start - ARM_BTN_PAD
+    if local_x < 0:
+        return None
+    for i, label in enumerate(ARM_BUTTONS):
+        bx = i * (ARM_BTN_W + ARM_BTN_GAP)
+        if bx <= local_x <= bx + ARM_BTN_W:
+            return label
+    return None
+
+
 def mode_button_from_click(
     x: int, y: int,
     modes: List[OutputModeType],

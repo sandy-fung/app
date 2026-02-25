@@ -48,16 +48,16 @@ class TrackingPhysDVSOutput(OutputMode):
             write_confirm=3,
         )
         self._drawing_thread.start()
-        # Re-center arm at workspace midpoint before tracking starts
-        self._bridge.put(False, 0.5, 0.5)
+        # Re-center arm only if currently at home (avoid nudge when already working)
+        if self._arm.at_home:
+            self._bridge.put(False, 0.5, 0.5)
         print("[PHYS_DVS] Activated — arm follows DVS tracking")
 
     def deactivate(self) -> None:
-        """Stop DVSDrawingThread and return arm to safe home."""
+        """Stop DVSDrawingThread (arm stays in place — use [HOME] to go home)."""
         if self._drawing_thread:
             self._drawing_thread.stop()
             self._drawing_thread = None
-        self._bridge.put_safe_home()
         print("[PHYS_DVS] Deactivated")
 
     def process(self, result) -> None:

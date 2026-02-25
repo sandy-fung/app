@@ -118,6 +118,11 @@ class ArmThread:
         """Access C_PiperInterface_V2 (available after is_ready)."""
         return self._conn.piper if self._conn is not None else None
 
+    @property
+    def at_home(self) -> bool:
+        """Whether arm is at safe home position."""
+        return self._at_home
+
     # ------------------------------------------------------------------
     # Thread internals
     # ------------------------------------------------------------------

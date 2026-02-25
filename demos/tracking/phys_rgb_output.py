@@ -21,12 +21,12 @@ class TrackingPhysRGBOutput(OutputMode):
         self._result = None
 
     def activate(self) -> None:
-        # Re-center arm at workspace midpoint before tracking starts
-        self._bridge.put(False, 0.5, 0.5)
+        # Re-center arm only if currently at home (avoid nudge when already working)
+        if self._arm.at_home:
+            self._bridge.put(False, 0.5, 0.5)
         print("[PHYS_RGB] Activated — arm follows RGB tracking")
 
     def deactivate(self) -> None:
-        self._bridge.put_safe_home()
         print("[PHYS_RGB] Deactivated")
 
     def process(self, result) -> None:
