@@ -9,6 +9,7 @@ import numpy as np
 
 from app.core.demo import OutputMode
 from app.core.display import draw_hint_bar, draw_paused_overlay
+from main_laser_drawing import compensate_for_arm
 
 
 class TrackingPhysRGBOutput(OutputMode):
@@ -39,7 +40,10 @@ class TrackingPhysRGBOutput(OutputMode):
         # Push RGB warped coordinates to arm bridge
         if result.rgb_warped:
             nx, ny = result.rgb_warped
-            self._bridge.put(True, nx, ny)
+            arm_nx, arm_ny = compensate_for_arm(
+                nx, ny, self._demo._args.rgb_rotate,
+            )
+            self._bridge.put(True, arm_nx, arm_ny)
         else:
             self._bridge.put(False, 0, 0)
 
