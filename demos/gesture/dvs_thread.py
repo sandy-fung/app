@@ -20,7 +20,7 @@ class DVSGestureThread:
     """Background thread: DVS camera -> inference -> vote -> snapshot.
 
     Args:
-        xe_cam: XenReal camera module (with ``get_frame_laser_nparray``).
+        xe_cam: XenReal camera module (uses ``g_cap.XeGetFrame`` for raw DVS data).
         inference: DVSGestureInference instance.
         voter: MajorityVoter for this thread's predictions.
         scale: Display scale factor for DVS preview.
@@ -82,11 +82,15 @@ class DVSGestureThread:
         fps_window = 30
 
         while not self._stop_event.is_set():
-            # Read DVS frame
-            frame = self._xe_cam.get_frame_laser_nparray()
-            if frame is None:
+            # Read raw DVS frame (bypass normalized API to get 0-15 data)
+            dvs_raw, _ = self._xe_cam.g_cap.XeGetFrame(
+                self._xe_cam.g_xereal_mode,
+                self._xe_cam.g_xereal_bit_depth,
+            )
+            if dvs_raw is None:
                 time.sleep(0.001)
                 continue
+            frame = dvs_raw
 
             try:
                 dvs_img = frame.reshape((DVS_HEIGHT, DVS_WIDTH))
