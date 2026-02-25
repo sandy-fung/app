@@ -18,6 +18,10 @@ XENREAL_ROOT = "/workspace/xenreal_001d"
 # DVS sensor dimensions
 DVS_WIDTH = 164
 DVS_HEIGHT = 160
+DVS_SCALE = 3           # DVS preview magnification factor
+CANVAS_SIZE = 400       # Trajectory canvas size in pixels
+RGB_DISPLAY_ROTATE = 90 # CW rotation to correct camera mounting
+IDLE_CLEAR = 1.0        # Auto-clear canvas after N seconds idle
 
 # DVS camera config files
 DVS_ONLY_CONFIG = (
@@ -33,7 +37,7 @@ DEFAULT_LASER_PROFILE = os.path.join(EX16_DIR, "laser_profile.json")
 # Gesture recognition constants
 # ---------------------------------------------------------------------------
 DVS_GESTURE_MODEL = (
-    "/workspace/gest/models/dvs_20260223_105731/best_loss_model.pth"
+    "/workspace/gest/xenreal_001d/gest/models/dvs_20260223_105731/best_loss_model.pth"
 )
 MEDIAPIPE_MODEL = (
     "/workspace/gest/rgb/models/20260119_150909/gesture_recognizer.task"
@@ -67,10 +71,6 @@ def parse_args() -> argparse.Namespace:
                     help="DVS /dev/video index")
     p.add_argument("--rgb-camera", default="0",
                     help="RGB camera index or path")
-    p.add_argument("--rgb-rotate", type=int, choices=[0, 90, 180, 270],
-                    default=90, help="RGB frame rotation")
-    p.add_argument("--scale", type=int, default=3,
-                    help="DVS preview scale factor")
 
     # Calibration
     p.add_argument("--dvs-cal", default=DEFAULT_DVS_CAL_PATH,
@@ -79,12 +79,6 @@ def parse_args() -> argparse.Namespace:
                     help="DVS noise mask path")
     p.add_argument("--load-profile", default=DEFAULT_LASER_PROFILE,
                     help="RGB laser profile JSON path")
-
-    # Tracking
-    p.add_argument("--idle-clear", type=float, default=1.0,
-                    help="Auto-clear canvas after N seconds idle")
-    p.add_argument("--canvas-size", type=int, default=400,
-                    help="Trajectory canvas size in pixels")
 
     # Arm
     p.add_argument("--can", default="can0", help="CAN bus interface name")

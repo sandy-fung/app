@@ -4,8 +4,6 @@ Renders arm status and gripper progress bar with buttons.
 Pen up/down controls have been moved to global arm buttons (see display.py).
 """
 
-from typing import Optional
-
 import cv2
 import numpy as np
 
@@ -57,10 +55,9 @@ def _draw_badge(img, x, y, text, color):
 class ArmCalibrationPanel:
     """Self-contained panel for arm calibration inside the Calibration tab."""
 
-    def __init__(self, bridge, arm_thread, args):
+    def __init__(self, bridge, arm_thread):
         self._bridge = bridge
         self._arm = arm_thread
-        self._args = args
 
         # Gripper (lazy)
         self._gripper = None

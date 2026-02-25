@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-from app.config import DVS_WIDTH, DVS_HEIGHT
+from app.config import DVS_WIDTH, DVS_HEIGHT, DVS_SCALE, CANVAS_SIZE, IDLE_CLEAR
 from app.core.demo import Demo
 
 
@@ -46,7 +46,6 @@ class TrackingDemo(Demo):
         self._result = TrackingResult()
         # RGB state
         self._rgb_frame = None
-        self._rotate_flag = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -61,7 +60,7 @@ class TrackingDemo(Demo):
         # Lazy imports
         from dvs_laser_tracker import DVSLaserTracker
         from dual_tracker_compare import DVSReaderThread
-        from laser_tracker import LaserTracker, LaserProfile, ROTATE_FLAGS
+        from laser_tracker import LaserTracker, LaserProfile
         from trajectory_canvas import TrajectoryCanvas
         from quad_detector import QuadDetector
         import os
@@ -74,9 +73,9 @@ class TrackingDemo(Demo):
         self._dvs_reader = DVSReaderThread(
             camera_mgr.xe_cam, self._dvs_tracker,
             self._store.dvs_homography,
-            scale=self._args.scale,
-            canvas_size=self._args.canvas_size,
-            idle_clear=self._args.idle_clear,
+            scale=DVS_SCALE,
+            canvas_size=CANVAS_SIZE,
+            idle_clear=IDLE_CLEAR,
             write_confirm=3,
         )
         self._dvs_reader.start()
@@ -94,16 +93,13 @@ class TrackingDemo(Demo):
 
         # RGB canvas
         self._rgb_canvas = TrajectoryCanvas(
-            size=self._args.canvas_size,
-            idle_clear=self._args.idle_clear,
+            size=CANVAS_SIZE,
+            idle_clear=IDLE_CLEAR,
         )
 
         # Quad detector for re-detection
         if self._quad_detector is None:
             self._quad_detector = QuadDetector()
-
-        # RGB rotation
-        self._rotate_flag = ROTATE_FLAGS.get(self._args.rgb_rotate)
 
         # Activate current output mode
         if self.active_output:
@@ -122,10 +118,7 @@ class TrackingDemo(Demo):
 
     def process_frame(self, camera_mgr) -> None:
         from main_dvs_tracking import dvs_frame_to_bgr, draw_dvs_target_scaled
-        from main_laser_drawing import (
-            draw_quad, draw_target,
-            warp_point as rgb_warp_point,
-        )
+        from main_laser_drawing import warp_point as rgb_warp_point
 
         # --- DVS: get latest from background thread ---
         dvs_frame, dvs_target, dvs_warped, dvs_fps = (
@@ -135,9 +128,9 @@ class TrackingDemo(Demo):
         # Build DVS display image
         dvs_display = None
         if dvs_frame is not None:
-            dvs_display = dvs_frame_to_bgr(dvs_frame, self._args.scale)
+            dvs_display = dvs_frame_to_bgr(dvs_frame, DVS_SCALE)
             if dvs_target is not None:
-                draw_dvs_target_scaled(dvs_display, dvs_target, self._args.scale)
+                draw_dvs_target_scaled(dvs_display, dvs_target, DVS_SCALE)
 
         # --- RGB: read + detect in main thread ---
         rgb_frame = camera_mgr.read_rgb_frame()

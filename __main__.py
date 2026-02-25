@@ -53,7 +53,7 @@ def main():
         time.sleep(args.can_warmup)
 
     # ── Step 1: Init cameras ──
-    camera_mgr = CameraManager(args.dvs_camera, args.rgb_camera, args.rgb_rotate)
+    camera_mgr = CameraManager(args.dvs_camera, args.rgb_camera)
 
     print("[INIT] Starting DVS camera...")
     camera_mgr.init_dvs()
@@ -134,7 +134,7 @@ def main():
     from app.demos.gesture.demo import GestureDemo
     from app.demos.gesture.gui_output import GestureGUIOutput
 
-    gesture_demo = GestureDemo(args)
+    gesture_demo = GestureDemo()
     gesture_demo.register_output(
         OutputModeType.GUI,
         GestureGUIOutput(gesture_demo),

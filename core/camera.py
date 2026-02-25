@@ -1,6 +1,6 @@
 """Centralized camera manager — init once, always running."""
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -14,10 +14,9 @@ class CameraManager:
       - "hybrid": RGB+DVS for calibration preview
     """
 
-    def __init__(self, dvs_device: int, rgb_device: str, rgb_rotate: int = 90):
+    def __init__(self, dvs_device: int, rgb_device: str):
         self._dvs_device = dvs_device
         self._rgb_device = rgb_device
-        self._rgb_rotate = rgb_rotate
         self._rgb_cap: Optional[cv2.VideoCapture] = None
         self._xe_cam = None  # XenReal module reference
         self._dvs_mode: Optional[str] = None
@@ -65,17 +64,21 @@ class CameraManager:
         return self._xe_cam.get_frame_laser_nparray()
 
     def read_rgb_frame(self) -> Optional[np.ndarray]:
-        """Read one RGB frame with rotation applied. Returns BGR or None."""
+        """Read one RGB frame, rotated per RGB_DISPLAY_ROTATE. Returns BGR or None."""
         if self._rgb_cap is None or not self._rgb_cap.isOpened():
             return None
         ret, frame = self._rgb_cap.read()
         if not ret:
             return None
-        if self._rgb_rotate and self._rgb_rotate != 0:
-            from laser_tracker import ROTATE_FLAGS
-            flag = ROTATE_FLAGS.get(self._rgb_rotate)
-            if flag is not None:
-                frame = cv2.rotate(frame, flag)
+        from app.config import RGB_DISPLAY_ROTATE
+        _ROTATE_FLAGS = {
+            90: cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+        }
+        flag = _ROTATE_FLAGS.get(RGB_DISPLAY_ROTATE)
+        if flag is not None:
+            frame = cv2.rotate(frame, flag)
         return frame
 
     # ------------------------------------------------------------------

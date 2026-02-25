@@ -11,7 +11,7 @@ from typing import Optional
 import cv2
 import numpy as np
 
-from app.config import DVS_WIDTH, DVS_HEIGHT
+from app.config import DVS_WIDTH, DVS_HEIGHT, DVS_SCALE
 from app.core.demo import Demo
 from app.core.display import (
     draw_hint_bar, resize_to_height,
@@ -38,8 +38,8 @@ class CalibrationDemo(Demo):
         self._quad_detector = None
         # Frames
         self._camera_mgr = None
-        self._dvs_panel_w = DVS_WIDTH * args.scale
-        self._dvs_panel_h = DVS_HEIGHT * args.scale
+        self._dvs_panel_w = DVS_WIDTH * DVS_SCALE
+        self._dvs_panel_h = DVS_HEIGHT * DVS_SCALE
 
         # Sub-mode: "page" or "arm"
         self._has_arm = bridge is not None and arm_thread is not None
@@ -58,7 +58,7 @@ class CalibrationDemo(Demo):
         camera_mgr.switch_dvs_to_hybrid()
 
         # Lazy import (needs sys.path setup)
-        from quad_calibrator import default_corners, load_calibration
+        from quad_calibrator import default_corners
         from quad_detector import QuadDetector
 
         # Load saved DVS calibration or use defaults
@@ -125,7 +125,7 @@ class CalibrationDemo(Demo):
         from quad_calibrator import draw_overlay, grab_gray_frame
         from main_laser_drawing import draw_quad
 
-        scale = self._args.scale
+        scale = DVS_SCALE
 
         # --- DVS panel ---
         gray = grab_gray_frame(self._camera_mgr.xe_cam)
@@ -178,7 +178,7 @@ class CalibrationDemo(Demo):
         if self._arm_panel is None:
             from app.demos.calibration.arm_panel import ArmCalibrationPanel
             self._arm_panel = ArmCalibrationPanel(
-                self._bridge, self._arm_thread, self._args,
+                self._bridge, self._arm_thread,
             )
 
         w = self._dvs_panel_w * 2 + 2  # match page width
@@ -269,7 +269,7 @@ class CalibrationDemo(Demo):
         if self._dvs_corners is None:
             return
 
-        scale = self._args.scale
+        scale = DVS_SCALE
 
         # Ignore clicks on RGB panel
         if x >= self._dvs_panel_w:

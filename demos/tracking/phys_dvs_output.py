@@ -8,7 +8,7 @@ Display shows single DVS canvas + arm status.
 import cv2
 import numpy as np
 
-from app.config import DVS_WIDTH, DVS_HEIGHT
+from app.config import DVS_WIDTH, DVS_HEIGHT, DVS_SCALE, CANVAS_SIZE, IDLE_CLEAR
 from app.core.demo import OutputMode
 from app.core.display import draw_hint_bar, draw_paused_overlay
 
@@ -42,9 +42,9 @@ class TrackingPhysDVSOutput(OutputMode):
             self._demo._xe_cam, tracker,
             self._demo._store.dvs_homography,
             self._bridge,
-            scale=self._demo._args.scale,
-            canvas_size=self._demo._args.canvas_size,
-            idle_clear=self._demo._args.idle_clear,
+            scale=DVS_SCALE,
+            canvas_size=CANVAS_SIZE,
+            idle_clear=IDLE_CLEAR,
             write_confirm=3,
         )
         self._drawing_thread.start()

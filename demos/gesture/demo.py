@@ -46,9 +46,8 @@ class GestureDemo(Demo):
     :meth:`activate` so that missing model files only affect this tab.
     """
 
-    def __init__(self, args):
+    def __init__(self):
         super().__init__("Gesture")
-        self._args = args
 
         # Inference engines (lazy-loaded)
         self._dvs_inference = None
@@ -137,11 +136,12 @@ class GestureDemo(Demo):
         # --- Start DVS background thread ---
         if self._dvs_inference is not None:
             from app.demos.gesture.dvs_thread import DVSGestureThread
+            from app.config import DVS_SCALE
             self._dvs_thread = DVSGestureThread(
                 camera_mgr.xe_cam,
                 self._dvs_inference,
                 self._dvs_voter,
-                scale=self._args.scale,
+                scale=DVS_SCALE,
                 bit_depth=4,
             )
             self._dvs_thread.start()
