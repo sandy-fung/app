@@ -51,11 +51,12 @@ def _list_can_interfaces() -> list[str]:
 
 
 def _get_bus_info(iface: str) -> str | None:
-    """Return ethtool bus-info for *iface*, or ``None`` on failure."""
+    """Return ethtool bus-info for *iface*, or ``None`` on failure/empty."""
     result = _run(["ethtool", "-i", iface], check=False)
     for line in result.stdout.splitlines():
         if line.startswith("bus-info:"):
-            return line.split(":", 1)[1].strip()
+            val = line.split(":", 1)[1].strip()
+            return val or None  # empty string → None
     return None
 
 
