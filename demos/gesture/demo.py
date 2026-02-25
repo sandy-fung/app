@@ -2,7 +2,8 @@
 
 DVS inference runs in a background thread (~200fps).
 RGB inference runs in the main thread (~30fps).
-Results are merged into GestureResult and forwarded to the active output.
+Only one inference engine is active at a time based on the output mode.
+Results are forwarded to the active output.
 """
 
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import Optional
 
 import numpy as np
 
-from app.core.demo import Demo
+from app.core.demo import Demo, OutputModeType
 from app.core.inference.common import MajorityVoter
 
 
@@ -40,18 +41,18 @@ class GestureResult:
 
 
 class GestureDemo(Demo):
-    """Gesture (RPS) recognition tab — DVS + RGB side-by-side.
+    """Gesture (RPS) recognition tab — DVS or RGB.
 
-    Always shown as a tab. Inference engines are lazy-loaded on first
-    :meth:`activate` so that missing model files only affect this tab.
+    Always shown as a tab. Models are eager-loaded at construction so that
+    activate() / switch_output() never block the UI thread.
     """
 
     def __init__(self):
         super().__init__("Gesture")
 
-        # Inference engines (lazy-loaded)
-        self._dvs_inference = None
-        self._rgb_inference = None
+        # Eager-load models at construction (blocks startup, not UI)
+        self._dvs_inference = self._load_dvs_model()
+        self._rgb_inference = self._load_rgb_model()
 
         # Voters
         self._dvs_voter: Optional[MajorityVoter] = None
@@ -68,9 +69,86 @@ class GestureDemo(Demo):
         # Camera ref
         self._camera_mgr = None
 
-        # Load flags (only try once)
-        self._dvs_load_attempted = False
-        self._rgb_load_attempted = False
+    # ------------------------------------------------------------------
+    # Model loading (eager, at construction)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_dvs_model():
+        """Load DVS gesture model. Returns inference instance or None."""
+        import os
+        from app.config import DVS_GESTURE_MODEL
+        if not os.path.isfile(DVS_GESTURE_MODEL):
+            print(f"[GESTURE] DVS model not found: {DVS_GESTURE_MODEL}")
+            return None
+        try:
+            from app.core.inference.dvs_gesture import DVSGestureInference
+            inf = DVSGestureInference(
+                model_path=DVS_GESTURE_MODEL,
+                use_fp16=False,         # --fp32
+                use_tensorrt=True,      # --tensorrt
+            )
+            print("[GESTURE] DVS model loaded")
+            return inf
+        except Exception as e:
+            print(f"[GESTURE] DVS model load failed: {e}")
+            return None
+
+    @staticmethod
+    def _load_rgb_model():
+        """Load RGB gesture model. Returns inference instance or None."""
+        import os
+        from app.config import MEDIAPIPE_MODEL
+        if not os.path.isfile(MEDIAPIPE_MODEL):
+            print(f"[GESTURE] RGB model not found: {MEDIAPIPE_MODEL}")
+            return None
+        try:
+            from app.core.inference.rgb_gesture import MediaPipeGestureInference
+            inf = MediaPipeGestureInference(model_path=MEDIAPIPE_MODEL)
+            print("[GESTURE] RGB model loaded")
+            return inf
+        except Exception as e:
+            print(f"[GESTURE] RGB model load failed: {e}")
+            return None
+
+    # ------------------------------------------------------------------
+    # Runtime helpers
+    # ------------------------------------------------------------------
+
+    def _needs_dvs(self) -> bool:
+        """Whether current output mode requires DVS inference."""
+        return self._active_output_type in (
+            OutputModeType.GUI, OutputModeType.PHYS_DVS,
+        )
+
+    def _needs_rgb(self) -> bool:
+        """Whether current output mode requires RGB inference."""
+        return self._active_output_type in (
+            OutputModeType.GUI, OutputModeType.PHYS_RGB,
+        )
+
+    def _ensure_dvs(self) -> None:
+        """Start DVS background thread if model is ready and thread not running."""
+        if (self._dvs_inference is not None
+                and self._dvs_thread is None
+                and self._camera_mgr is not None):
+            from app.demos.gesture.dvs_thread import DVSGestureThread
+            from app.config import DVS_SCALE
+            self._dvs_thread = DVSGestureThread(
+                self._camera_mgr.xe_cam,
+                self._dvs_inference,
+                self._dvs_voter,
+                scale=DVS_SCALE,
+                bit_depth=4,
+            )
+            self._dvs_thread.start()
+            print("[GESTURE] DVS gesture thread started")
+
+    def _stop_dvs_thread(self) -> None:
+        """Stop DVS background thread if running."""
+        if self._dvs_thread:
+            self._dvs_thread.stop()
+            self._dvs_thread = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -83,45 +161,11 @@ class GestureDemo(Demo):
         camera_mgr.switch_dvs_to_tracking()
 
         from app.config import (
-            DVS_GESTURE_MODEL, MEDIAPIPE_MODEL,
             GESTURE_CONF, DVS_HOLD_FRAMES, RGB_HOLD_FRAMES,
             GESTURE_VOTE_MODE,
         )
-        import os
 
-        # --- DVS inference (lazy, once) ---
-        if not self._dvs_load_attempted:
-            self._dvs_load_attempted = True
-            if os.path.isfile(DVS_GESTURE_MODEL):
-                try:
-                    from app.core.inference.dvs_gesture import DVSGestureInference
-                    self._dvs_inference = DVSGestureInference(
-                        model_path=DVS_GESTURE_MODEL,
-                        use_fp16=False,         # --fp32
-                        use_tensorrt=True,      # --tensorrt
-                    )
-                except Exception as e:
-                    print(f"[GESTURE] DVS model load failed: {e}")
-                    self._dvs_inference = None
-            else:
-                print(f"[GESTURE] DVS model not found: {DVS_GESTURE_MODEL}")
-
-        # --- RGB inference (lazy, once) ---
-        if not self._rgb_load_attempted:
-            self._rgb_load_attempted = True
-            if os.path.isfile(MEDIAPIPE_MODEL):
-                try:
-                    from app.core.inference.rgb_gesture import MediaPipeGestureInference
-                    self._rgb_inference = MediaPipeGestureInference(
-                        model_path=MEDIAPIPE_MODEL,
-                    )
-                except Exception as e:
-                    print(f"[GESTURE] RGB model load failed: {e}")
-                    self._rgb_inference = None
-            else:
-                print(f"[GESTURE] RGB model not found: {MEDIAPIPE_MODEL}")
-
-        # --- Voters ---
+        # --- Voters (always created — cheap) ---
         self._dvs_voter = MajorityVoter(
             window_size=DVS_HOLD_FRAMES,
             conf_threshold=GESTURE_CONF,
@@ -133,19 +177,9 @@ class GestureDemo(Demo):
             vote_mode=GESTURE_VOTE_MODE,
         )
 
-        # --- Start DVS background thread ---
-        if self._dvs_inference is not None:
-            from app.demos.gesture.dvs_thread import DVSGestureThread
-            from app.config import DVS_SCALE
-            self._dvs_thread = DVSGestureThread(
-                camera_mgr.xe_cam,
-                self._dvs_inference,
-                self._dvs_voter,
-                scale=DVS_SCALE,
-                bit_depth=4,
-            )
-            self._dvs_thread.start()
-            print("[GESTURE] DVS gesture thread started")
+        # --- Start DVS thread if current mode needs it ---
+        if self._needs_dvs():
+            self._ensure_dvs()
 
         # Activate current output mode
         if self.active_output:
@@ -154,14 +188,25 @@ class GestureDemo(Demo):
     def deactivate(self) -> None:
         if self.active_output:
             self.active_output.deactivate()
-        if self._dvs_thread:
-            self._dvs_thread.stop()
-            self._dvs_thread = None
+        self._stop_dvs_thread()
         # Reset voters
         if self._dvs_voter:
             self._dvs_voter.clear()
         if self._rgb_voter:
             self._rgb_voter.clear()
+
+    def switch_output(self, mode: OutputModeType) -> None:
+        """Override to start/stop inference engines per output mode."""
+        super().switch_output(mode)
+
+        if self._camera_mgr is None:
+            return  # Tab not yet activated — thread starts in activate()
+
+        # Start/stop DVS thread based on new mode
+        if self._needs_dvs():
+            self._ensure_dvs()
+        else:
+            self._stop_dvs_thread()
 
     # ------------------------------------------------------------------
     # Frame processing
@@ -185,23 +230,25 @@ class GestureDemo(Demo):
                 self._dvs_thread.get_latest()
             )
 
-        # --- RGB: inference in main thread ---
-        rgb_frame = camera_mgr.read_rgb_frame()
+        # --- RGB: inference in main thread (only if mode needs it) ---
+        rgb_frame = None
         rgb_gesture = "none"
         rgb_conf = 0.0
         rgb_stable = "none"
         rgb_fps = 0.0
         rgb_elapsed_ms = 0.0
 
-        if rgb_frame is not None and self._rgb_inference is not None:
-            gesture, conf, elapsed = self._rgb_inference.predict(rgb_frame)
-            now = _time.perf_counter()
-            self._rgb_voter.push(gesture, conf, now)
-            rgb_gesture = gesture
-            rgb_conf = conf
-            rgb_stable = self._rgb_voter.majority()
-            rgb_elapsed_ms = elapsed * 1000
-            rgb_fps = min(1000.0 / rgb_elapsed_ms, 999.0) if rgb_elapsed_ms > 0 else 0.0
+        if self._needs_rgb():
+            rgb_frame = camera_mgr.read_rgb_frame()
+            if rgb_frame is not None and self._rgb_inference is not None:
+                gesture, conf, elapsed = self._rgb_inference.predict(rgb_frame)
+                now = _time.perf_counter()
+                self._rgb_voter.push(gesture, conf, now)
+                rgb_gesture = gesture
+                rgb_conf = conf
+                rgb_stable = self._rgb_voter.majority()
+                rgb_elapsed_ms = elapsed * 1000
+                rgb_fps = min(1000.0 / rgb_elapsed_ms, 999.0) if rgb_elapsed_ms > 0 else 0.0
 
         # --- Build result snapshot ---
         self._result = GestureResult(

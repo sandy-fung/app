@@ -6,14 +6,13 @@ result snapshot for the main thread to consume via get_latest().
 
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 import cv2
 import numpy as np
 
 from app.config import DVS_WIDTH, DVS_HEIGHT, DVS_NORMALIZE_CENTER, DVS_NORMALIZE_STEEPNESS
-from app.core.inference.common import MajorityVoter, GESTURE_COLORS
+from app.core.inference.common import MajorityVoter
 from app.core.inference.dvs_gesture import DVSGestureInference
 
 
@@ -103,7 +102,13 @@ class DVSGestureThread:
                 continue
 
             # Inference
-            gesture, conf, probs, elapsed = self._inference.predict(dvs_img)
+            try:
+                gesture, conf, probs, elapsed = self._inference.predict(dvs_img)
+            except Exception as e:
+                import traceback
+                print(f"[DVS_GEST] Inference error: {e}")
+                traceback.print_exc()
+                continue
 
             # Vote
             now = time.perf_counter()

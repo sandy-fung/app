@@ -132,13 +132,8 @@ def main():
 
     # ── Step 8: Gesture demo (always visible) ──
     from app.demos.gesture.demo import GestureDemo
-    from app.demos.gesture.gui_output import GestureGUIOutput
 
     gesture_demo = GestureDemo()
-    gesture_demo.register_output(
-        OutputModeType.GUI,
-        GestureGUIOutput(gesture_demo),
-    )
 
     if hand_bridge and hand_thread:
         from app.demos.gesture.phys_dvs_output import GesturePhysDVSOutput
@@ -151,8 +146,14 @@ def main():
             OutputModeType.PHYS_RGB,
             GesturePhysRGBOutput(gesture_demo, hand_bridge, hand_thread),
         )
-
-    gesture_demo.switch_output(OutputModeType.GUI)
+        gesture_demo.switch_output(OutputModeType.PHYS_DVS)
+    else:
+        from app.demos.gesture.gui_output import GestureGUIOutput
+        gesture_demo.register_output(
+            OutputModeType.GUI,
+            GestureGUIOutput(gesture_demo),
+        )
+        gesture_demo.switch_output(OutputModeType.GUI)
 
     # ── Step 9: Run main loop ──
     demos = {
