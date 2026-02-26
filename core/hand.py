@@ -196,9 +196,12 @@ class HandThread:
             print(f"[HAND] finger_move failed: {e}")
 
     def _cleanup(self) -> None:
-        """Move to neutral on shutdown."""
+        """Move to neutral on shutdown and release C++ resources."""
         if self._hand is not None:
             try:
                 self._hand.finger_move(pose=POSES_O6["none"])
             except Exception as e:
                 print(f"[HAND] Cleanup error: {e}")
+            # Release C++ object explicitly to avoid destructor issues
+            # during interpreter shutdown.
+            self._hand = None

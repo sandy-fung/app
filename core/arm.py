@@ -20,7 +20,7 @@ Architecture:
 import queue
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Optional
 
 # Sentinel values for special commands
 _CMD_SAFE_HOME = "__SAFE_HOME__"
@@ -249,14 +249,19 @@ class ArmThread:
         print("[ARM] Safe home reached (motors still enabled)")
 
     def _cleanup(self) -> None:
-        """Safe shutdown of arm hardware."""
+        """Safe shutdown of arm hardware and release C++ resources."""
         if self._drawer is not None:
             try:
                 self._drawer.safe_disable()
             except Exception:
                 pass
+            self._drawer = None
         if self._conn is not None:
+            # disconnect() calls safe_disable() internally then releases
+            # the C++ piper object, avoiding destructor issues during
+            # interpreter shutdown.
             try:
-                self._conn.safe_disable(return_home=False)
+                self._conn.disconnect()
             except Exception:
                 pass
+            self._conn = None
