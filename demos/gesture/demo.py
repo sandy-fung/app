@@ -189,7 +189,10 @@ class GestureDemo(Demo):
         if self.active_output:
             self.active_output.deactivate()
         self._stop_dvs_thread()
-        # Reset voters
+        self.reset_voters()
+
+    def reset_voters(self) -> None:
+        """Clear both voter windows (e.g. after hand arrives)."""
         if self._dvs_voter:
             self._dvs_voter.clear()
         if self._rgb_voter:

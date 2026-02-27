@@ -112,6 +112,12 @@ class HandThread:
         # Internal
         self._hand = None
         self._last_cmd_time: float = 0.0
+        self._moving: bool = False
+
+    @property
+    def moving(self) -> bool:
+        """True while the hand is in transit to target position."""
+        return self._moving
 
     def start(self) -> None:
         """Launch daemon thread."""
@@ -188,12 +194,35 @@ class HandThread:
 
         pose = POSES_O6[gesture]
         try:
+            self._moving = True
             self._hand.finger_move(pose=pose)
             self.current_gesture = gesture
             self.move_count += 1
             self._last_cmd_time = now
+            self._wait_arrival(pose)
         except Exception as e:
             print(f"[HAND] finger_move failed: {e}")
+        finally:
+            self._moving = False
+
+    def _wait_arrival(self, target: list) -> None:
+        """Poll get_state() until hand converges to target or timeout."""
+        from app.config import (
+            GESTURE_ARRIVAL_THRESHOLD, GESTURE_ARRIVAL_TIMEOUT,
+            GESTURE_ARRIVAL_POLL,
+        )
+        deadline = time.perf_counter() + GESTURE_ARRIVAL_TIMEOUT
+        n = len(target)
+        while not self._stop_event.is_set() and time.perf_counter() < deadline:
+            time.sleep(GESTURE_ARRIVAL_POLL)
+            try:
+                state = self._hand.get_state()
+                if state and len(state) >= n:
+                    if all(abs(state[i] - target[i]) <= GESTURE_ARRIVAL_THRESHOLD
+                           for i in range(n)):
+                        return
+            except Exception:
+                pass
 
     def _cleanup(self) -> None:
         """Move to neutral on shutdown and release C++ resources."""

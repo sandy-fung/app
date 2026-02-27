@@ -4,7 +4,6 @@ Same as phys_dvs_output but uses rgb_stable instead.
 Inference happens in the main thread so process() handles everything.
 """
 
-import cv2
 import numpy as np
 
 from app.core.demo import OutputMode
@@ -23,26 +22,41 @@ class GesturePhysRGBOutput(OutputMode):
         self._hand = hand_thread
         self._result = None
         self._last_sent: str = ""
+        self._was_moving: bool = False
 
     def activate(self) -> None:
         # Start paused for safety
         self._demo.tracking_enabled = False
         self._last_sent = ""
+        self._was_moving = False
         print("[PHYS_RGB_GEST] Activated — PAUSED (press Space to start)")
 
     def deactivate(self) -> None:
         self._bridge.put_neutral()
         self._last_sent = ""
+        self._was_moving = False
         print("[PHYS_RGB_GEST] Deactivated — hand returning to neutral")
 
     def on_tracking_changed(self, enabled: bool) -> None:
         if not enabled:
             self._bridge.put_neutral()
             self._last_sent = ""
+        self._was_moving = False
 
     def process(self, result) -> None:
         self._result = result
         if not self._demo.tracking_enabled:
+            return
+
+        # Hand still moving — skip predictions
+        if self._hand and self._hand.moving:
+            self._was_moving = True
+            return
+
+        # Hand just arrived — flush stale voter data
+        if self._was_moving:
+            self._demo.reset_voters()
+            self._was_moving = False
             return
 
         stable = result.rgb_stable

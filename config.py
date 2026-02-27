@@ -54,6 +54,11 @@ DVS_NORMALIZE_STEEPNESS = 3.0
 HAND_TYPE = "right"
 HAND_JOINT = "O6"
 
+# Arrival detection — wait for hand to reach target position
+GESTURE_ARRIVAL_THRESHOLD = 15   # max per-joint error to consider "arrived" (0-255 scale)
+GESTURE_ARRIVAL_TIMEOUT = 2.0    # fallback timeout in seconds
+GESTURE_ARRIVAL_POLL = 0.05      # poll interval in seconds
+
 
 def setup_sys_path() -> None:
     """Add required paths for importing existing modules."""
