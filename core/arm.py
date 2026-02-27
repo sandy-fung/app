@@ -9,12 +9,12 @@ Architecture:
       -> CommandBridge.put(write, x, y)
       -> ArmThread._consume_loop() -> DrawingController.move()
 
-    Tab / mode switch:
+    Tab / mode switch / home button:
       -> bridge.put_safe_home()  -- drain queue + sentinel
-      -> ArmThread._go_safe_home() -- pen_up, lift, home joints (motors stay on)
+      -> ArmThread._go_safe_home() -- pen_up + lift + SAFE_HOME_JOINTS (motors stay on)
 
     Program exit:
-      -> arm_thread.stop() -> _cleanup() -> safe_disable + motor off
+      -> arm_thread.stop() -> _cleanup() -> SAFE_HOME_JOINTS + conn homing + motor off
 """
 
 import queue
@@ -44,9 +44,9 @@ class CommandBridge:
     def put_safe_home(self) -> None:
         """Drain pending commands and enqueue a safe-home sentinel.
 
-        Called by output modes / calibration demo on deactivate so that
-        the arm returns to SAFE_HOME_JOINTS without processing stale
-        draw commands.
+        Called on output deactivate (mode/tab switch, quit) so that the
+        arm lifts to safe Z without processing stale draw commands.
+        Skips if already at home (_go_safe_home has an _at_home guard).
         """
         self.clear()
         try:
@@ -106,7 +106,7 @@ class ArmThread:
         self._conn = None
         self._drawer = None
 
-        # Safe-home flag: True when arm is at SAFE_HOME_JOINTS
+        # Safe-home flag: True when arm is at SAFE_HOME_JOINTS position
         self._at_home: bool = False
 
     def start(self) -> None:
@@ -214,52 +214,34 @@ class ArmThread:
                 self.fail_count += 1
 
     def _go_safe_home(self) -> None:
-        """Return arm to SAFE_HOME_JOINTS (pen_up -> lift -> home joints).
+        """Pen up + lift Z + move to SAFE_HOME_JOINTS.
 
-        Same sequence as DrawingController.safe_disable() but does NOT
-        disable motors -- arm stays powered at home position until the
-        next activate() or program exit.
+        Reuses DrawingController.safe_disable() which performs:
+            1. pen_up  2. lift to safe_z+10cm  3. move_joint(SAFE_HOME_JOINTS)
+        Motors stay enabled — only the position changes.
+        Skips if already at home.
         """
         if self._at_home or self._drawer is None:
             return
 
-        from drawing import SAFE_HOME_JOINTS
-
-        d = self._drawer
-        # 1. Pen up
-        if not d.pen_up():
-            print("[ARM] Safe home aborted: pen_up failed")
-            return
-        # 2. Lift 10cm above safe_z
-        if not d._move_to_xyz(
-            d._x, d._y, d.config.safe_z + 0.10,
-            speed=d.config.move_speed, wait=True,
-        ):
-            print("[ARM] Safe home aborted: lift failed")
-            return
-        # 3. Move to home joints (J1-J6 only; J7 gripper untouched)
-        d.motion.move_joint(SAFE_HOME_JOINTS, speed_factor=d.config.move_speed)
-        # 4. Wait until position reached
-        d.reader.wait_for_position(
-            SAFE_HOME_JOINTS, tolerance_rad=0.035, timeout_sec=10.0,
-        )
-        # 5. Reset drawing state (do NOT disable motors)
-        d._current_joints = list(SAFE_HOME_JOINTS)
+        self._drawer.safe_disable()
         self._at_home = True
-        print("[ARM] Safe home reached (motors still enabled)")
+        print("[ARM] Safe home reached (SAFE_HOME_JOINTS, motors still enabled)")
 
     def _cleanup(self) -> None:
-        """Safe shutdown of arm hardware and release C++ resources."""
-        if self._drawer is not None:
+        """Safe shutdown: SAFE_HOME_JOINTS (if needed) → conn homing → motor off."""
+        # 1. Go to SAFE_HOME_JOINTS if not already there
+        try:
+            self._go_safe_home()
+        except Exception:
+            pass
+        self._drawer = None
+        # 2. Standby + disable motors via conn homing, then release C++ object
+        if self._conn is not None:
             try:
-                self._drawer.safe_disable()
+                self._conn.safe_disable(return_home=True)
             except Exception:
                 pass
-            self._drawer = None
-        if self._conn is not None:
-            # disconnect() calls safe_disable() internally then releases
-            # the C++ piper object, avoiding destructor issues during
-            # interpreter shutdown.
             try:
                 self._conn.disconnect()
             except Exception:

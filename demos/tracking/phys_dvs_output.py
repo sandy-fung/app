@@ -31,6 +31,8 @@ class TrackingPhysDVSOutput(OutputMode):
         # Stop the existing reader thread
         if self._demo.dvs_reader:
             self._demo.dvs_reader.stop()
+ 
+        self._bridge.put(False, 0.5, 0.5)
 
         # Create fresh tracker and start drawing thread
         tracker = DVSLaserTracker(
@@ -60,7 +62,6 @@ class TrackingPhysDVSOutput(OutputMode):
             self._drawing_thread = None
         # Drain residual high-freq commands, then go center (pen up)
         self._bridge.clear()
-        self._bridge.put(False, 0.5, 0.5)
         print("[PHYS_DVS] Deactivated — arm returning to center")
 
     def on_tracking_changed(self, enabled: bool) -> None:

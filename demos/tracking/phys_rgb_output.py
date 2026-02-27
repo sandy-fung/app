@@ -23,12 +23,12 @@ class TrackingPhysRGBOutput(OutputMode):
     def activate(self) -> None:
         # Start paused for safety — user must press Space to begin
         self._demo.tracking_enabled = False
+        self._bridge.put(False, 0.5, 0.5)
         print("[PHYS_RGB] Activated — PAUSED (press Space to start tracking)")
 
     def deactivate(self) -> None:
         """Return arm to center on mode exit."""
         self._bridge.clear()
-        self._bridge.put(False, 0.5, 0.5)
         print("[PHYS_RGB] Deactivated — arm returning to center")
 
     def on_tracking_changed(self, enabled: bool) -> None:
