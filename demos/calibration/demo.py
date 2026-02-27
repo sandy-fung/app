@@ -73,8 +73,12 @@ class CalibrationDemo(Demo):
         if self._quad_detector is None:
             self._quad_detector = QuadDetector()
 
-        # Try initial RGB quad detection
-        self._rgb_quad = self._store.rgb_quad
+        # Load saved RGB calibration
+        if self._store.rgb_quad is None:
+            self._store.load_rgb(self._args.rgb_cal)
+        self._rgb_quad = self._store.rgb_quad  # may still be None
+
+        # Try initial RGB quad detection if no saved calibration
         if self._rgb_quad is None:
             rgb_frame = camera_mgr.read_rgb_frame()
             if rgb_frame is not None:
@@ -83,6 +87,20 @@ class CalibrationDemo(Demo):
                     self._store.set_rgb(self._rgb_quad)
 
     def deactivate(self) -> None:
+        # Auto-save DVS calibration
+        if self._dvs_corners is not None:
+            self._store.set_dvs(self._dvs_corners)
+            if self._store.save_dvs(self._args.dvs_cal):
+                print("[CAL] DVS corners saved")
+            else:
+                print("[CAL] DVS save failed")
+        # Auto-save RGB calibration
+        if self._rgb_quad:
+            self._store.set_rgb(self._rgb_quad)
+            if self._store.save_rgb(self._args.rgb_cal):
+                print("[CAL] RGB quad saved")
+            else:
+                print("[CAL] RGB save failed")
         if self._camera_mgr:
             self._camera_mgr.switch_dvs_to_tracking()
 
@@ -165,7 +183,7 @@ class CalibrationDemo(Demo):
         rgb_ok = "OK" if self._store.rgb_calibrated else "--"
         hints = [
             f"DVS: {dvs_ok}  |  RGB: {rgb_ok}",
-            "[Enter] confirm  [R] reset DVS  [D] re-detect RGB",
+            "[R] reset DVS  [D] re-detect RGB  (auto-save on exit)",
         ]
         if self._has_arm:
             hints.append("[Tab] switch to Arm Cal")
@@ -202,16 +220,6 @@ class CalibrationDemo(Demo):
             return super().handle_key(key)
 
         # Page mode — original logic
-        if key == 13:  # Enter — confirm calibration
-            if self._dvs_corners is not None:
-                self._store.set_dvs(self._dvs_corners)
-                self._store.save_dvs(self._args.dvs_cal)
-                print(f"[CAL] DVS corners saved: {self._dvs_corners.tolist()}")
-            if self._rgb_quad:
-                self._store.set_rgb(self._rgb_quad)
-                print(f"[CAL] RGB quad confirmed: {self._rgb_quad}")
-            return True
-
         if key in (ord('r'), ord('R')):  # Reset DVS corners
             from quad_calibrator import default_corners
             self._dvs_corners = default_corners()

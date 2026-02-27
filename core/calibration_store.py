@@ -1,5 +1,6 @@
 """Shared calibration data — written by CalibrationDemo, read by TrackingDemo."""
 
+import json
 import os
 from typing import Optional
 
@@ -42,11 +43,12 @@ class CalibrationStore:
         self.dvs_corners = corners
         self.dvs_homography = compute_homography(corners)
 
-    def save_dvs(self, path: str) -> None:
-        """Persist DVS corners to JSON file."""
+    def save_dvs(self, path: str) -> bool:
+        """Persist DVS corners to JSON file. Returns True on success."""
         from quad_calibrator import save_calibration
-        if self.dvs_corners is not None:
-            save_calibration(self.dvs_corners, path)
+        if self.dvs_corners is None:
+            return False
+        return save_calibration(self.dvs_corners, path)
 
     def load_dvs(self, path: str) -> bool:
         """Load saved DVS corners and recompute homography.
@@ -56,7 +58,11 @@ class CalibrationStore:
         from quad_calibrator import load_calibration, compute_homography
         if not os.path.isfile(path):
             return False
-        corners = load_calibration(path)
+        try:
+            corners = load_calibration(path)
+        except Exception as e:
+            print(f"[CAL] Failed to load {path}: {e}")
+            return False
         if corners is not None:
             self.dvs_corners = corners
             self.dvs_homography = compute_homography(corners)
@@ -73,3 +79,41 @@ class CalibrationStore:
         src = quad.corners.astype(np.float32)
         dst = np.array([[0, 1], [1, 1], [1, 0], [0, 0]], dtype=np.float32)
         self.rgb_homography = cv2.getPerspectiveTransform(src, dst)
+
+    def save_rgb(self, path: str) -> bool:
+        """Persist RGB quad corners to JSON file."""
+        if self.rgb_quad is None:
+            return False
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            data = {"corners": self.rgb_quad.corners.tolist()}
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+            return True
+        except OSError as e:
+            print(f"[CAL] Failed to save RGB calibration: {e}")
+            return False
+
+    def load_rgb(self, path: str) -> bool:
+        """Load saved RGB quad corners and recompute homography."""
+        if not os.path.isfile(path):
+            return False
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            corners = np.array(data["corners"], dtype=np.float32)
+            if corners.shape != (4, 2):
+                raise ValueError(f"Invalid corners shape: {corners.shape}")
+        except Exception as e:
+            print(f"[CAL] Failed to load {path}: {e}")
+            return False
+        contour = corners.reshape(-1, 1, 2).astype(np.float32)
+        from quad_detector import QuadTarget
+        quad = QuadTarget(
+            corners=corners,
+            area=float(cv2.contourArea(contour)),
+            perimeter=float(cv2.arcLength(contour, True)),
+            contour=contour,
+        )
+        self.set_rgb(quad)
+        return True

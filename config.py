@@ -31,6 +31,7 @@ HYBRID_CONFIG = "/workspace/xenreal_001d/ESC001D_2D_RAW8_DV_RAW2.cfg"
 
 # Default calibration / profile paths
 DEFAULT_DVS_CAL_PATH = os.path.join(EX15_DIR, "dvs_calibration.json")
+DEFAULT_RGB_CAL_PATH = os.path.join(EX15_DIR, "rgb_calibration.json")
 DEFAULT_LASER_PROFILE = os.path.join(EX16_DIR, "laser_profile.json")
 
 # ---------------------------------------------------------------------------
@@ -75,6 +76,8 @@ def parse_args() -> argparse.Namespace:
     # Calibration
     p.add_argument("--dvs-cal", default=DEFAULT_DVS_CAL_PATH,
                     help="DVS calibration JSON path")
+    p.add_argument("--rgb-cal", default=DEFAULT_RGB_CAL_PATH,
+                    help="RGB calibration JSON path")
     p.add_argument("--noise-mask", default=None,
                     help="DVS noise mask path")
     p.add_argument("--load-profile", default=DEFAULT_LASER_PROFILE,
