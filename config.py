@@ -23,6 +23,10 @@ CANVAS_SIZE = 400       # Trajectory canvas size in pixels
 RGB_DISPLAY_ROTATE = 90 # CW rotation to correct camera mounting
 IDLE_CLEAR = 1.0        # Auto-clear canvas after N seconds idle
 
+# Display normalization — fixed window dimensions (total, including UI chrome)
+DISPLAY_W = 1024        # Total window width
+DISPLAY_H = 768         # Total window height
+
 # DVS camera config files
 DVS_ONLY_CONFIG = (
     "/workspace/xenreal_001d/ESC001D_DV_RAW4_200FPS_20260204_modify.cfg"

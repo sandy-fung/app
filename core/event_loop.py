@@ -6,15 +6,19 @@ from typing import Dict, Optional
 
 from app.core.demo import Demo, OutputModeType
 from app.core.camera import CameraManager
+from app.config import DISPLAY_W, DISPLAY_H
 from app.core.display import (
     render_tab_bar, tab_index_from_click, TAB_BAR_HEIGHT,
-    render_mode_row, mode_row_click,
+    render_mode_row, mode_row_click, MODE_ROW_HEIGHT,
     render_arm_buttons, arm_button_from_click, arm_buttons_width,
-    MODE_ORDER,
+    MODE_ORDER, normalize_frame,
 )
 from app.core.memory_monitor import MemoryMonitor
 
 WINDOW_NAME = "Demo"
+
+# Fixed content area height (total window minus UI chrome)
+_CONTENT_H = DISPLAY_H - TAB_BAR_HEIGHT - MODE_ROW_HEIGHT  # 700
 
 
 def _draw_mem_bar(frame, rss_mb, peak_mb, warning=False):
@@ -55,12 +59,15 @@ class MainLoop:
         self._active_name = ""
         self._active_demo: Optional[Demo] = None
         self._running = False
-        self._frame_width = 800  # updated dynamically after first render
+        self._frame_width = DISPLAY_W
         self._shown_modes = []   # mode buttons currently displayed
-        self._mode_row_h = 0     # current height of mode-button row
+        self._mode_row_h = MODE_ROW_HEIGHT  # always rendered
         self._bridge = bridge
         self._arm_thread = arm_thread
         self._mem_monitor = MemoryMonitor()
+        self._content_scale = 1.0
+        self._content_pad_x = 0
+        self._content_pad_y = 0
 
     @property
     def _pen_down(self) -> bool:
@@ -71,7 +78,9 @@ class MainLoop:
 
     def run(self) -> None:
         """Start the main loop (blocking)."""
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+        cv2.namedWindow(WINDOW_NAME,
+                        cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
+        cv2.resizeWindow(WINDOW_NAME, DISPLAY_W, DISPLAY_H)
         cv2.setMouseCallback(WINDOW_NAME, self._mouse_callback)
 
         # Start on first tab
@@ -81,7 +90,9 @@ class MainLoop:
         while self._running:
             self._active_demo.process_frame(self._camera_mgr)
             frame = self._active_demo.render()
-            self._frame_width = frame.shape[1]
+            frame, self._content_scale, self._content_pad_x, \
+                self._content_pad_y = normalize_frame(
+                    frame, DISPLAY_W, _CONTENT_H)
 
             # Determine mode buttons for active demo
             outputs = self._active_demo._outputs
@@ -96,30 +107,30 @@ class MainLoop:
             arm_w = arm_buttons_width() if self._bridge else 0
             reserved_right = arm_w
 
-            # Compose tab bar
+            # Compose tab bar (width always DISPLAY_W)
             tabs = [(str(i + 1), name) for i, name in enumerate(self._demo_names)]
-            tab_bar = render_tab_bar(tabs, self._active_name, frame.shape[1],
+            tab_bar = render_tab_bar(tabs, self._active_name, DISPLAY_W,
                                      reserved_right=reserved_right)
             if arm_w > 0:
                 at_home = (self._arm_thread.at_home
                            if self._arm_thread else True)
                 arm_bar = render_arm_buttons(at_home, arm_w,
                                              pen_down=self._pen_down)
-                tab_bar[:, frame.shape[1] - arm_w:] = arm_bar
+                tab_bar[:, DISPLAY_W - arm_w:] = arm_bar
 
-            # Mode row (separate row below tab bar)
+            # Mode row — always rendered (empty gray bar when no modes)
             if self._shown_modes:
                 mode_row = render_mode_row(
-                    self._shown_modes, active_mode, available,
-                    frame.shape[1])
-                self._mode_row_h = mode_row.shape[0]
-                composed = np.vstack([tab_bar, mode_row, frame])
+                    self._shown_modes, active_mode, available, DISPLAY_W)
             else:
-                self._mode_row_h = 0
-                composed = np.vstack([tab_bar, frame])
+                mode_row = render_mode_row([], None, set(), DISPLAY_W)
+            self._mode_row_h = mode_row.shape[0]  # always MODE_ROW_HEIGHT
+            composed = np.vstack([tab_bar, mode_row, frame])
+
             self._mem_monitor.tick()
             _draw_mem_bar(composed, self._mem_monitor.rss_mb,
                           self._mem_monitor.peak_mb, self._mem_monitor.warning)
+
             cv2.imshow(WINDOW_NAME, composed)
 
             key = cv2.waitKey(1) & 0xFF
@@ -175,16 +186,26 @@ class MainLoop:
     # Mouse handling (tab clicks)
     # ------------------------------------------------------------------
 
+    def _to_demo_coords(self, x: int, y: int, header_h: int):
+        """Reverse normalize_frame transform for mouse coordinates."""
+        dx = x - self._content_pad_x
+        dy = (y - header_h) - self._content_pad_y
+        if self._content_scale > 0:
+            dx = int(dx / self._content_scale)
+            dy = int(dy / self._content_scale)
+        return dx, dy
+
     def _mouse_callback(self, event: int, x: int, y: int,
                         flags: int, param) -> None:
         """Handle mouse events for tab bar and mode row clicks."""
         header_h = TAB_BAR_HEIGHT + self._mode_row_h
 
         if event != cv2.EVENT_LBUTTONDOWN:
-            # Forward non-click events to demo with y offset
+            # Forward non-click events to demo with reverse-mapped coords
             if self._active_demo and hasattr(self._active_demo, 'mouse_callback'):
+                dx, dy = self._to_demo_coords(x, y, header_h)
                 self._active_demo.mouse_callback(
-                    event, x, y - header_h, flags, param)
+                    event, dx, dy, flags, param)
             return
 
         # --- Region 1: Tab bar (0 ~ TAB_BAR_HEIGHT) ---
@@ -229,8 +250,9 @@ class MainLoop:
 
         # --- Region 3: Demo content ---
         if self._active_demo and hasattr(self._active_demo, 'mouse_callback'):
+            dx, dy = self._to_demo_coords(x, y, header_h)
             self._active_demo.mouse_callback(
-                event, x, y - header_h, flags, param)
+                event, dx, dy, flags, param)
 
     # ------------------------------------------------------------------
     # Tab switching

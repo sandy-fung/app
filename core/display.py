@@ -64,6 +64,24 @@ def pad_to_width(img: np.ndarray, target_w: int) -> np.ndarray:
     return np.hstack([img, pad])
 
 
+def normalize_frame(
+    frame: np.ndarray, target_w: int, target_h: int,
+) -> tuple:
+    """Letterbox frame to target_w x target_h, centered.
+
+    Returns (normalized, scale, pad_x, pad_y) for reverse mouse mapping.
+    """
+    h, w = frame.shape[:2]
+    scale = min(target_w / w, target_h / h)
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    canvas = np.full((target_h, target_w, 3), (240, 240, 240), dtype=np.uint8)
+    pad_x = (target_w - new_w) // 2
+    pad_y = (target_h - new_h) // 2
+    canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+    return canvas, scale, pad_x, pad_y
+
+
 def make_label_bar(text: str, width: int, height: int = 28,
                    bg_color=(40, 40, 40),
                    fg_color=(220, 220, 220)) -> np.ndarray:
