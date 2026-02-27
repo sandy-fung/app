@@ -6,6 +6,8 @@ result snapshot for the main thread to consume via get_latest().
 
 import threading
 import time
+import traceback
+from collections import deque
 from typing import Optional, Tuple
 
 import cv2
@@ -78,8 +80,8 @@ class DVSGestureThread:
         """Thread main loop."""
         from cv2_like_xe_sdk import dvs_normalize_sigmoid
 
-        fps_timestamps = []
         fps_window = 30
+        fps_timestamps: deque[float] = deque(maxlen=fps_window)
 
         while not self._stop_event.is_set():
             # Read raw DVS frame (bypass normalized API to get 0-15 data)
@@ -109,7 +111,6 @@ class DVSGestureThread:
             try:
                 gesture, conf, probs, elapsed = self._inference.predict(dvs_img)
             except Exception as e:
-                import traceback
                 print(f"[DVS_GEST] Inference error: {e}")
                 traceback.print_exc()
                 continue
@@ -121,8 +122,6 @@ class DVSGestureThread:
 
             # FPS
             fps_timestamps.append(now)
-            if len(fps_timestamps) > fps_window:
-                fps_timestamps = fps_timestamps[-fps_window:]
             if len(fps_timestamps) >= 2:
                 span = fps_timestamps[-1] - fps_timestamps[0]
                 fps = (len(fps_timestamps) - 1) / span if span > 0 else 0.0

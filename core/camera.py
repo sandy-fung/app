@@ -1,5 +1,6 @@
 """Centralized camera manager — init once, always running."""
 
+import threading
 from typing import Optional
 
 import cv2
@@ -18,6 +19,7 @@ class CameraManager:
         self._dvs_device = dvs_device
         self._rgb_device = rgb_device
         self._rgb_cap: Optional[cv2.VideoCapture] = None
+        self._rgb_lock = threading.Lock()
         self._xe_cam = None  # XenReal module reference
         self._dvs_mode: Optional[str] = None
 
@@ -64,10 +66,15 @@ class CameraManager:
         return self._xe_cam.get_frame_laser_nparray()
 
     def read_rgb_frame(self) -> Optional[np.ndarray]:
-        """Read one RGB frame, rotated per RGB_DISPLAY_ROTATE. Returns BGR or None."""
-        if self._rgb_cap is None or not self._rgb_cap.isOpened():
-            return None
-        ret, frame = self._rgb_cap.read()
+        """Read one RGB frame, rotated per RGB_DISPLAY_ROTATE. Returns BGR or None.
+
+        Thread-safe: guarded by ``_rgb_lock`` so background inference threads
+        and the main thread can call this without racing on VideoCapture.
+        """
+        with self._rgb_lock:
+            if self._rgb_cap is None or not self._rgb_cap.isOpened():
+                return None
+            ret, frame = self._rgb_cap.read()
         if not ret:
             return None
         from app.config import RGB_DISPLAY_ROTATE

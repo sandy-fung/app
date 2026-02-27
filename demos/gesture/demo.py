@@ -1,7 +1,6 @@
 """Gesture demo — Rock-Paper-Scissors recognition tab.
 
-DVS inference runs in a background thread (~200fps).
-RGB inference runs in the main thread (~30fps).
+Both DVS (~200fps) and RGB (~30fps) inference run in background threads.
 Only one inference engine is active at a time based on the output mode.
 Results are forwarded to the active output.
 """
@@ -58,8 +57,9 @@ class GestureDemo(Demo):
         self._dvs_voter: Optional[MajorityVoter] = None
         self._rgb_voter: Optional[MajorityVoter] = None
 
-        # DVS background thread
+        # Background threads
         self._dvs_thread = None
+        self._rgb_thread = None
 
         # State
         self._game_mode = "battle"
@@ -150,6 +150,26 @@ class GestureDemo(Demo):
             self._dvs_thread.stop()
             self._dvs_thread = None
 
+    def _ensure_rgb(self) -> None:
+        """Start RGB background thread if model is ready and thread not running."""
+        if (self._rgb_inference is not None
+                and self._rgb_thread is None
+                and self._camera_mgr is not None):
+            from app.demos.gesture.rgb_thread import RGBGestureThread
+            self._rgb_thread = RGBGestureThread(
+                self._camera_mgr,
+                self._rgb_inference,
+                self._rgb_voter,
+            )
+            self._rgb_thread.start()
+            print("[GESTURE] RGB gesture thread started")
+
+    def _stop_rgb_thread(self) -> None:
+        """Stop RGB background thread if running."""
+        if self._rgb_thread:
+            self._rgb_thread.stop()
+            self._rgb_thread = None
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -177,9 +197,11 @@ class GestureDemo(Demo):
             vote_mode=GESTURE_VOTE_MODE,
         )
 
-        # --- Start DVS thread if current mode needs it ---
+        # --- Start inference threads if current mode needs them ---
         if self._needs_dvs():
             self._ensure_dvs()
+        if self._needs_rgb():
+            self._ensure_rgb()
 
         # Activate current output mode
         if self.active_output:
@@ -189,6 +211,7 @@ class GestureDemo(Demo):
         if self.active_output:
             self.active_output.deactivate()
         self._stop_dvs_thread()
+        self._stop_rgb_thread()
         self.reset_voters()
 
     def reset_voters(self) -> None:
@@ -211,13 +234,17 @@ class GestureDemo(Demo):
         else:
             self._stop_dvs_thread()
 
+        # Start/stop RGB thread based on new mode
+        if self._needs_rgb():
+            self._ensure_rgb()
+        else:
+            self._stop_rgb_thread()
+
     # ------------------------------------------------------------------
     # Frame processing
     # ------------------------------------------------------------------
 
     def process_frame(self, camera_mgr) -> None:
-        import time as _time
-
         # --- DVS: snapshot from background thread ---
         dvs_display = None
         dvs_gesture = "none"
@@ -233,7 +260,7 @@ class GestureDemo(Demo):
                 self._dvs_thread.get_latest()
             )
 
-        # --- RGB: inference in main thread (only if mode needs it) ---
+        # --- RGB: snapshot from background thread ---
         rgb_frame = None
         rgb_gesture = "none"
         rgb_conf = 0.0
@@ -241,17 +268,11 @@ class GestureDemo(Demo):
         rgb_fps = 0.0
         rgb_elapsed_ms = 0.0
 
-        if self._needs_rgb():
-            rgb_frame = camera_mgr.read_rgb_frame()
-            if rgb_frame is not None and self._rgb_inference is not None:
-                gesture, conf, elapsed = self._rgb_inference.predict(rgb_frame)
-                now = _time.perf_counter()
-                self._rgb_voter.push(gesture, conf, now)
-                rgb_gesture = gesture
-                rgb_conf = conf
-                rgb_stable = self._rgb_voter.majority()
-                rgb_elapsed_ms = elapsed * 1000
-                rgb_fps = min(1000.0 / rgb_elapsed_ms, 999.0) if rgb_elapsed_ms > 0 else 0.0
+        if self._rgb_thread:
+            (rgb_frame, rgb_gesture, rgb_conf,
+             rgb_stable, rgb_fps, rgb_elapsed_ms) = (
+                self._rgb_thread.get_latest()
+            )
 
         # --- Build result snapshot ---
         self._result = GestureResult(
