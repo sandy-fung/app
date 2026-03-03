@@ -36,6 +36,10 @@ class CalibrationDemo(Demo):
         # RGB quad state
         self._rgb_quad = None
         self._quad_detector = None
+        self._rgb_dragging_idx: Optional[int] = None
+        self._rgb_panel_offset_x: int = 0
+        self._rgb_scale: float = 1.0
+        self._rgb_cam_size: tuple = (640, 480)
         # Frames
         self._camera_mgr = None
         self._dvs_panel_w = DVS_WIDTH * DVS_SCALE
@@ -162,9 +166,12 @@ class CalibrationDemo(Demo):
         # --- RGB panel ---
         rgb_frame = self._camera_mgr.read_rgb_frame()
         if rgb_frame is not None:
+            self._rgb_cam_size = (rgb_frame.shape[1], rgb_frame.shape[0])
+            self._rgb_scale = self._dvs_panel_h / rgb_frame.shape[0]
             rgb_display = rgb_frame.copy()
             if self._rgb_quad:
-                draw_quad(rgb_display, self._rgb_quad)
+                draw_quad(rgb_display, self._rgb_quad,
+                          active_idx=self._rgb_dragging_idx)
             rgb_panel = resize_to_height(rgb_display, self._dvs_panel_h)
         else:
             rgb_panel = np.zeros((self._dvs_panel_h, self._dvs_panel_w, 3),
@@ -176,6 +183,7 @@ class CalibrationDemo(Demo):
 
         # --- Compose side-by-side ---
         sep = np.zeros((self._dvs_panel_h, 2, 3), dtype=np.uint8)
+        self._rgb_panel_offset_x = self._dvs_panel_w + 2
         composed = np.hstack([dvs_panel, sep, rgb_panel])
 
         # Hint bar at bottom
@@ -246,10 +254,10 @@ class CalibrationDemo(Demo):
 
     def mouse_callback(self, event: int, x: int, y: int,
                        flags: int, param) -> None:
-        """Handle mouse events for DVS corner dragging.
+        """Handle mouse events for DVS / RGB corner dragging.
 
         Note: x, y are already adjusted for tab bar offset by MainLoop.
-        Only DVS panel (left side) accepts drag events.
+        DVS panel (left) and RGB panel (right) both accept drag events.
         """
         # Sub-tab bar click detection (always shown)
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -273,27 +281,50 @@ class CalibrationDemo(Demo):
                 self._arm_panel.mouse_callback(event, x, y, flags, param)
             return
 
-        # Page mode — original corner-drag logic
-        if self._dvs_corners is None:
+        # Page mode — corner-drag logic for DVS (left) and RGB (right)
+
+        # Global LBUTTONUP: reset drag state regardless of which panel the
+        # cursor lands on.  Prevents stuck-drag when releasing across panels.
+        if event == cv2.EVENT_LBUTTONUP:
+            self._dragging_idx = None
+            self._rgb_dragging_idx = None
             return
 
         scale = DVS_SCALE
 
-        # Ignore clicks on RGB panel
-        if x >= self._dvs_panel_w:
-            return
+        if x < self._dvs_panel_w:
+            # --- DVS panel dragging ---
+            if self._dvs_corners is None:
+                return
 
-        if event == cv2.EVENT_LBUTTONDOWN:
-            pts_disp = self._dvs_corners * scale
-            dists = np.sqrt(((pts_disp - [x, y]) ** 2).sum(axis=1))
-            idx = int(np.argmin(dists))
-            if dists[idx] < self._hit_radius:
-                self._dragging_idx = idx
+            if event == cv2.EVENT_LBUTTONDOWN:
+                pts_disp = self._dvs_corners * scale
+                dists = np.sqrt(((pts_disp - [x, y]) ** 2).sum(axis=1))
+                idx = int(np.argmin(dists))
+                if dists[idx] < self._hit_radius:
+                    self._dragging_idx = idx
 
-        elif event == cv2.EVENT_MOUSEMOVE and self._dragging_idx is not None:
-            nx = np.clip(x / scale, 0, DVS_WIDTH - 1)
-            ny = np.clip(y / scale, 0, DVS_HEIGHT - 1)
-            self._dvs_corners[self._dragging_idx] = [nx, ny]
+            elif event == cv2.EVENT_MOUSEMOVE and self._dragging_idx is not None:
+                nx = np.clip(x / scale, 0, DVS_WIDTH - 1)
+                ny = np.clip(y / scale, 0, DVS_HEIGHT - 1)
+                self._dvs_corners[self._dragging_idx] = [nx, ny]
 
-        elif event == cv2.EVENT_LBUTTONUP:
-            self._dragging_idx = None
+        elif x >= self._rgb_panel_offset_x and self._rgb_quad is not None:
+            # --- RGB panel dragging ---
+            rgb_scale = self._rgb_scale
+            cam_x = (x - self._rgb_panel_offset_x) / rgb_scale
+            cam_y = y / rgb_scale
+
+            if event == cv2.EVENT_LBUTTONDOWN:
+                corners = self._rgb_quad.corners
+                dists = np.sqrt(((corners - [cam_x, cam_y]) ** 2).sum(axis=1))
+                idx = int(np.argmin(dists))
+                # Hit test in display space
+                if dists[idx] * rgb_scale < self._hit_radius:
+                    self._rgb_dragging_idx = idx
+
+            elif event == cv2.EVENT_MOUSEMOVE and self._rgb_dragging_idx is not None:
+                cam_w, cam_h = self._rgb_cam_size
+                cam_x = np.clip(cam_x, 0, cam_w - 1)
+                cam_y = np.clip(cam_y, 0, cam_h - 1)
+                self._rgb_quad.corners[self._rgb_dragging_idx] = [cam_x, cam_y]
