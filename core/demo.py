@@ -35,6 +35,10 @@ class OutputMode(ABC):
     def on_tracking_changed(self, enabled: bool) -> None:
         """Called when tracking is toggled. Override to propagate state."""
 
+    def mouse_callback(self, x: int, y: int) -> bool:
+        """Handle mouse click at content-local coordinates. Return True if consumed."""
+        return False
+
     def handle_key(self, key: int) -> bool:
         """Handle keypress. Return True if consumed."""
         return False

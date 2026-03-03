@@ -662,6 +662,64 @@ def arm_button_from_click(
     return None
 
 
+# ---------------------------------------------------------------------------
+# View toggle (Single / Dual canvas)
+# ---------------------------------------------------------------------------
+
+_TOGGLE_W, _TOGGLE_H = 80, 24
+_TOGGLE_MARGIN = 6
+
+
+def draw_view_toggle(frame: np.ndarray, is_dual: bool) -> None:
+    """Draw a small toggle button at the top-right corner of *frame* (in-place).
+
+    When *is_dual* is True the button reads ``Single >`` (click to go single).
+    When False it reads ``< Dual`` (click to go dual).
+    """
+    h, w = frame.shape[:2]
+    if w < _TOGGLE_W + _TOGGLE_MARGIN * 2 or h < _TOGGLE_H + _TOGGLE_MARGIN * 2:
+        return
+
+    x2 = w - _TOGGLE_MARGIN
+    x1 = x2 - _TOGGLE_W
+    y1 = _TOGGLE_MARGIN
+    y2 = y1 + _TOGGLE_H
+
+    # Semi-transparent dark background
+    roi = frame[y1:y2, x1:x2]
+    cv2.addWeighted(roi, 0.35, np.zeros_like(roi), 0.65, 0, dst=roi)
+
+    # Rounded-ish border
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (180, 180, 180), 1)
+
+    label = "Single >" if is_dual else "< Dual"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thick = 0.42, 1
+    (tw, th), _ = cv2.getTextSize(label, font, scale, thick)
+    tx = x1 + (_TOGGLE_W - tw) // 2
+    ty = y1 + (_TOGGLE_H + th) // 2
+    cv2.putText(frame, label, (tx, ty), font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+
+
+def view_toggle_from_click(
+    x: int, y: int, frame_w: int, is_dual: bool,
+) -> Optional[bool]:
+    """Hit-test the view toggle button. Return new *is_dual* value, or None."""
+    x2 = frame_w - _TOGGLE_MARGIN
+    x1 = x2 - _TOGGLE_W
+    y1 = _TOGGLE_MARGIN
+    y2 = y1 + _TOGGLE_H
+    if x1 <= x <= x2 and y1 <= y <= y2:
+        return not is_dual
+    return None
+
+
+def draw_active_border(frame: np.ndarray, thickness: int = 3) -> None:
+    """Draw an orange border around *frame* to mark it as the active canvas."""
+    cv2.rectangle(frame, (0, 0), (frame.shape[1] - 1, frame.shape[0] - 1),
+                  (0, 140, 255), thickness)
+
+
 def mode_button_from_click(
     x: int, y: int,
     modes: List[OutputModeType],

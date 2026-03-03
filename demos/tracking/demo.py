@@ -223,6 +223,19 @@ class TrackingDemo(Demo):
         return super().handle_key(key)
 
     # ------------------------------------------------------------------
+    # Mouse handling
+    # ------------------------------------------------------------------
+
+    def mouse_callback(self, event: int, x: int, y: int,
+                       flags: int, param) -> None:
+        """Forward left-button clicks to the active output mode."""
+        import cv2
+        if event != cv2.EVENT_LBUTTONDOWN:
+            return
+        if self.active_output:
+            self.active_output.mouse_callback(x, y)
+
+    # ------------------------------------------------------------------
     # Accessors for output modes
     # ------------------------------------------------------------------
 
