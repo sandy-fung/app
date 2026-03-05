@@ -1,5 +1,6 @@
 """Centralized camera manager — init once, always running."""
 
+import time
 import threading
 from typing import Optional
 
@@ -92,12 +93,15 @@ class CameraManager:
     # DVS mode switching
     # ------------------------------------------------------------------
 
+    _DVS_SWITCH_DELAY = 0.5  # seconds to wait after close before reopen
+
     def switch_dvs_to_hybrid(self) -> None:
         """Switch DVS to hybrid RGB+DVS mode (for calibration)."""
         if self._dvs_mode == "hybrid":
             return
         from app.config import HYBRID_CONFIG
         self._xe_cam.close_camera(self._xe_cam.g_cap)
+        time.sleep(self._DVS_SWITCH_DELAY)
         self._xe_cam.CONFIG_ABS_PATH = HYBRID_CONFIG
         self._xe_cam.start_camera_laser()
         self._dvs_mode = "hybrid"
@@ -108,6 +112,7 @@ class CameraManager:
             return
         from app.config import DVS_ONLY_CONFIG
         self._xe_cam.close_camera(self._xe_cam.g_cap)
+        time.sleep(self._DVS_SWITCH_DELAY)
         self._xe_cam.CONFIG_ABS_PATH = DVS_ONLY_CONFIG
         self._xe_cam.start_camera_laser()
         self._dvs_mode = "tracking"
