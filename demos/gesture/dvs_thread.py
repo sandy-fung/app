@@ -78,7 +78,7 @@ class DVSGestureThread:
 
     def _run(self) -> None:
         """Thread main loop."""
-        from cv2_like_xe_sdk import dvs_normalize_sigmoid
+        from cv2_like_xe_sdk import dvs_normalize, dvs_normalize_sigmoid
 
         fps_window = 30
         fps_timestamps: deque[float] = deque(maxlen=fps_window)
@@ -95,14 +95,17 @@ class DVSGestureThread:
             frame = dvs_raw
 
             try:
-                dvs_img = frame.reshape((DVS_HEIGHT, DVS_WIDTH))
+                raw_2d = frame.reshape((DVS_HEIGHT, DVS_WIDTH))
+                # Inference: sigmoid normalization
                 dvs_img = dvs_normalize_sigmoid(
-                    dvs_img, self._bit_depth,
+                    raw_2d.copy(), self._bit_depth,
                     center=DVS_NORMALIZE_CENTER,
                     steepness=DVS_NORMALIZE_STEEPNESS,
                 )
                 if dvs_img is None:
                     continue
+                # Display: linear symmetric normalization
+                dvs_display_img = dvs_normalize(raw_2d, self._bit_depth)
             except Exception as e:
                 print(f"[DVS_GEST] Frame error: {e}")
                 continue
@@ -128,8 +131,8 @@ class DVSGestureThread:
             else:
                 fps = 0.0
 
-            # Build display image
-            dvs_bgr = cv2.cvtColor(dvs_img, cv2.COLOR_GRAY2BGR)
+            # Build display image (using linear normalization)
+            dvs_bgr = cv2.cvtColor(dvs_display_img, cv2.COLOR_GRAY2BGR)
             display = cv2.resize(
                 dvs_bgr,
                 (DVS_WIDTH * self._scale, DVS_HEIGHT * self._scale),
