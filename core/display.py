@@ -112,7 +112,7 @@ def draw_hint_bar(
     thickness: int = 1,
     padding: int = 8,
     alpha: float = 0.6,
-) -> None:
+) -> int:
     """Draw a semi-transparent dark bar with hint text at the bottom of *frame*.
 
     Args:
@@ -123,9 +123,12 @@ def draw_hint_bar(
         thickness: text stroke thickness.
         padding: pixel padding around text.
         alpha: darkening factor for the bar (0 = transparent, 1 = opaque black).
+
+    Returns:
+        Actual bar height in pixels (0 if nothing was drawn).
     """
     if not lines or frame.shape[0] < 60:
-        return
+        return 0
 
     font = cv2.FONT_HERSHEY_SIMPLEX
     default_color = (220, 220, 220)
@@ -157,6 +160,8 @@ def draw_hint_bar(
         cv2.putText(frame, text, (padding, y_cursor),
                     font, font_scale, color, thickness, cv2.LINE_AA)
         y_cursor -= th + line_gap
+
+    return bar_h
 
 
 def draw_paused_overlay(frame: np.ndarray) -> None:
@@ -711,6 +716,80 @@ def view_toggle_from_click(
     y2 = y1 + _TOGGLE_H
     if x1 <= x <= x2 and y1 <= y <= y2:
         return not is_dual
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Hint bar toggle buttons
+# ---------------------------------------------------------------------------
+
+_HINT_BTN_W = 70
+_HINT_BTN_H = 20
+_HINT_BTN_GAP = 4
+_HINT_BTN_MARGIN = 8
+
+
+def draw_hint_buttons(
+    frame: np.ndarray,
+    buttons: List[Tuple[str, str]],
+    active_key: str,
+    bar_h: int = 50,
+) -> None:
+    """Draw toggle buttons on the right side of the hint bar (in-place)."""
+    h, w = frame.shape[:2]
+    n = len(buttons)
+    if n == 0:
+        return
+
+    total_w = n * _HINT_BTN_W + (n - 1) * _HINT_BTN_GAP
+    x_start = w - _HINT_BTN_MARGIN - total_w
+    y_center = h - bar_h // 2
+
+    for i, (key, label) in enumerate(buttons):
+        bx = x_start + i * (_HINT_BTN_W + _HINT_BTN_GAP)
+        by1 = y_center - _HINT_BTN_H // 2
+        by2 = by1 + _HINT_BTN_H
+
+        if key == active_key:
+            cv2.rectangle(frame, (bx, by1), (bx + _HINT_BTN_W, by2),
+                          (0, 140, 255), -1)  # orange
+            text_color = (255, 255, 255)
+        else:
+            cv2.rectangle(frame, (bx, by1), (bx + _HINT_BTN_W, by2),
+                          (180, 180, 180), -1)  # gray
+            cv2.rectangle(frame, (bx, by1), (bx + _HINT_BTN_W, by2),
+                          (120, 120, 120), 1)
+            text_color = (40, 40, 40)
+
+        ts = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
+        tx = bx + (_HINT_BTN_W - ts[0]) // 2
+        ty = y_center + ts[1] // 2
+        cv2.putText(frame, label, (tx, ty),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, text_color, 1, cv2.LINE_AA)
+
+
+def hint_button_from_click(
+    x: int, y: int,
+    frame_w: int, frame_h: int,
+    buttons: List[Tuple[str, str]],
+    bar_h: int = 50,
+) -> Optional[str]:
+    """Hit-test hint bar buttons. Return button key or None."""
+    n = len(buttons)
+    if n == 0:
+        return None
+    total_w = n * _HINT_BTN_W + (n - 1) * _HINT_BTN_GAP
+    x_start = frame_w - _HINT_BTN_MARGIN - total_w
+    y_center = frame_h - bar_h // 2
+    by1 = y_center - _HINT_BTN_H // 2
+    by2 = by1 + _HINT_BTN_H
+
+    if not (by1 <= y <= by2):
+        return None
+    for i, (key, _) in enumerate(buttons):
+        bx = x_start + i * (_HINT_BTN_W + _HINT_BTN_GAP)
+        if bx <= x <= bx + _HINT_BTN_W:
+            return key
     return None
 
 

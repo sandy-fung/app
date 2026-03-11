@@ -12,15 +12,21 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from cv2_like_xe_sdk import dvs_normalize
+
 from app.config import DVS_WIDTH, DVS_HEIGHT, DVS_SCALE
 from app.core.demo import Demo
 from app.core.display import (
-    draw_hint_bar, resize_to_height,
+    draw_hint_bar, draw_hint_buttons, hint_button_from_click,
+    resize_to_height,
     render_sub_tab_bar, sub_tab_from_click, SUB_TAB_BAR_HEIGHT,
 )
 
 # Sub-tab definitions
 _SUB_TABS = [("page", "Page Cal"), ("arm", "Arm Cal")]
+
+# DVS config mode toggle buttons
+_DVS_CFG_BTNS = [("dvs_only", "DVS Only"), ("hybrid", "Hybrid")]
 
 
 class CalibrationDemo(Demo):
@@ -53,6 +59,9 @@ class CalibrationDemo(Demo):
         self._bridge = bridge
         self._arm_thread = arm_thread
         self._content_w = 0  # updated each render()
+        self._dvs_config_mode = "dvs_only"  # "dvs_only" or "hybrid"
+        self._hint_bar_h = 50  # matches draw_hint_bar default
+        self._page_w = 0  # actual composed width, updated each render
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -60,7 +69,10 @@ class CalibrationDemo(Demo):
 
     def activate(self, camera_mgr) -> None:
         self._camera_mgr = camera_mgr
-        camera_mgr.switch_dvs_to_hybrid()
+        if self._dvs_config_mode == "hybrid":
+            camera_mgr.switch_dvs_to_hybrid()
+        else:
+            camera_mgr.switch_dvs_to_tracking()
 
         # Lazy import (needs sys.path setup)
         from quad_calibrator import default_corners
@@ -180,10 +192,25 @@ class CalibrationDemo(Demo):
         scale = DVS_SCALE
 
         # --- DVS panel ---
-        gray = self._grab_gray_safe()
-        if gray is None:
-            gray = np.zeros((DVS_HEIGHT, DVS_WIDTH), dtype=np.uint8)
-        bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        if self._dvs_config_mode == "hybrid":
+            gray = self._grab_gray_safe()
+            if gray is None:
+                gray = np.zeros((DVS_HEIGHT, DVS_WIDTH), dtype=np.uint8)
+            bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        else:
+            # dvs_only — render like gesture display (full dynamic range)
+            xe = self._camera_mgr.xe_cam
+            dvs_raw, _ = xe.g_cap.XeGetFrame(
+                xe.g_xereal_mode, xe.g_xereal_bit_depth,
+            )
+            if dvs_raw is not None:
+                raw_2d = dvs_raw.reshape((DVS_HEIGHT, DVS_WIDTH))
+                gray = dvs_normalize(raw_2d, xe.g_xereal_bit_depth)
+            else:
+                gray = None
+            if gray is None:
+                gray = np.zeros((DVS_HEIGHT, DVS_WIDTH), dtype=np.uint8)
+            bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         dvs_panel = cv2.resize(
             bgr, (self._dvs_panel_w, self._dvs_panel_h),
             interpolation=cv2.INTER_NEAREST,
@@ -215,6 +242,7 @@ class CalibrationDemo(Demo):
         sep = np.zeros((self._dvs_panel_h, 2, 3), dtype=np.uint8)
         self._rgb_panel_offset_x = self._dvs_panel_w + 2
         composed = np.hstack([dvs_panel, sep, rgb_panel])
+        self._page_w = composed.shape[1]
 
         # Hint bar at bottom
         dvs_ok = "OK" if self._store.dvs_calibrated else "--"
@@ -225,7 +253,9 @@ class CalibrationDemo(Demo):
         ]
         if self._has_arm:
             hints.append("[Tab] switch to Arm Cal")
-        draw_hint_bar(composed, hints)
+        self._hint_bar_h = draw_hint_bar(composed, hints)
+        draw_hint_buttons(composed, _DVS_CFG_BTNS, self._dvs_config_mode,
+                          bar_h=self._hint_bar_h)
 
         return composed
 
@@ -310,6 +340,22 @@ class CalibrationDemo(Demo):
             if self._arm_panel is not None:
                 self._arm_panel.mouse_callback(event, x, y, flags, param)
             return
+
+        # Page mode — check hint bar config buttons first
+        if event == cv2.EVENT_LBUTTONDOWN:
+            page_w = self._page_w or (self._dvs_panel_w * 2 + 2)  # fallback
+            clicked_cfg = hint_button_from_click(
+                x, y, page_w, self._dvs_panel_h,
+                _DVS_CFG_BTNS, bar_h=self._hint_bar_h,
+            )
+            if clicked_cfg is not None and clicked_cfg != self._dvs_config_mode:
+                self._dvs_config_mode = clicked_cfg
+                if clicked_cfg == "hybrid":
+                    self._camera_mgr.switch_dvs_to_hybrid()
+                else:
+                    self._camera_mgr.switch_dvs_to_tracking()
+                print(f"[CAL] DVS config -> {self._dvs_config_mode}")
+                return
 
         # Page mode — corner-drag logic for DVS (left) and RGB (right)
 
