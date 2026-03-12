@@ -23,7 +23,7 @@ from app.core.display import (
 )
 
 # Sub-tab definitions
-_SUB_TABS = [("page", "Page Cal"), ("arm", "Arm Cal")]
+_SUB_TABS = [("page", "Page Cal"), ("arm", "Arm Cal"), ("laser", "Laser Cal")]
 
 # DVS config mode toggle buttons
 _DVS_CFG_BTNS = [("dvs_only", "DVS Only"), ("hybrid", "Hybrid")]
@@ -52,10 +52,11 @@ class CalibrationDemo(Demo):
         self._dvs_panel_w = DVS_WIDTH * DVS_SCALE
         self._dvs_panel_h = DVS_HEIGHT * DVS_SCALE
 
-        # Sub-mode: "page" or "arm"
+        # Sub-mode: "page", "arm", or "laser"
         self._has_arm = bridge is not None and arm_thread is not None
         self._sub_mode = "page"
         self._arm_panel = None  # lazy ArmCalibrationPanel
+        self._laser_panel = None  # lazy LaserCalibrationPanel
         self._bridge = bridge
         self._arm_thread = arm_thread
         self._content_w = 0  # updated each render()
@@ -165,6 +166,8 @@ class CalibrationDemo(Demo):
     def render(self) -> np.ndarray:
         if self._has_arm and self._sub_mode == "arm":
             content = self._render_arm()
+        elif self._sub_mode == "laser":
+            content = self._render_laser()
         else:
             content = self._render_page()
 
@@ -179,7 +182,7 @@ class CalibrationDemo(Demo):
 
     def _available_sub_tabs(self) -> set:
         """Return the set of enabled sub-tab keys."""
-        avail = {"page"}
+        avail = {"page", "laser"}
         if self._has_arm:
             avail.add("arm")
         return avail
@@ -271,6 +274,17 @@ class CalibrationDemo(Demo):
         h = self._dvs_panel_h
         return self._arm_panel.render(w, h)
 
+    def _render_laser(self) -> np.ndarray:
+        """Render the laser calibration sub-panel."""
+        if self._laser_panel is None:
+            from app.demos.calibration.laser_panel import LaserCalibrationPanel
+            self._laser_panel = LaserCalibrationPanel(
+                self._camera_mgr, self._args, cal_store=self._store,
+            )
+
+        h = self._dvs_panel_h
+        return self._laser_panel.render(h)
+
     # ------------------------------------------------------------------
     # Key handling
     # ------------------------------------------------------------------
@@ -284,6 +298,11 @@ class CalibrationDemo(Demo):
         # Delegate to active sub-mode
         if self._has_arm and self._sub_mode == "arm":
             if self._arm_panel is not None and self._arm_panel.handle_key(key):
+                return True
+            return super().handle_key(key)
+
+        if self._sub_mode == "laser":
+            if self._laser_panel is not None and self._laser_panel.handle_key(key):
                 return True
             return super().handle_key(key)
 
@@ -339,6 +358,12 @@ class CalibrationDemo(Demo):
         if self._has_arm and self._sub_mode == "arm":
             if self._arm_panel is not None:
                 self._arm_panel.mouse_callback(event, x, y, flags, param)
+            return
+
+        # Delegate to laser panel
+        if self._sub_mode == "laser":
+            if self._laser_panel is not None:
+                self._laser_panel.mouse_callback(event, x, y, flags, param)
             return
 
         # Page mode — check hint bar config buttons first
