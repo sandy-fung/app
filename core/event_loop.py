@@ -17,8 +17,60 @@ from app.core.memory_monitor import MemoryMonitor
 
 WINDOW_NAME = "Demo"
 
-# Fixed content area height (total window minus UI chrome)
-_CONTENT_H = DISPLAY_H - TAB_BAR_HEIGHT - MODE_ROW_HEIGHT  # 700
+# Default content area (used as a floor when the X11 lookup fails or the
+# user shrinks the window below this size). The actual render size grows
+# with the OpenCV window — queried each frame via python-xlib since the
+# OpenCV Qt backend's getWindowImageRect() does not report enlargements.
+_FALLBACK_CONTENT_W = DISPLAY_W
+_FALLBACK_CONTENT_H = DISPLAY_H - TAB_BAR_HEIGHT - MODE_ROW_HEIGHT
+
+
+def _find_x_window(name: str):
+    """Locate the X11 window created by cv2.namedWindow by WM_NAME.
+
+    Returns (display, window) or (None, None) if python-xlib is missing,
+    the X server is unreachable (Wayland-only env), or no matching window
+    is found.
+    """
+    try:
+        from Xlib import display as _xdisplay
+    except Exception:
+        return None, None
+    try:
+        d = _xdisplay.Display()
+    except Exception:
+        return None, None
+    try:
+        root = d.screen().root
+
+        def walk(parent):
+            try:
+                children = parent.query_tree().children
+            except Exception:
+                return None
+            for child in children:
+                try:
+                    wm_name = child.get_wm_name()
+                except Exception:
+                    wm_name = None
+                if wm_name == name:
+                    return child
+                found = walk(child)
+                if found is not None:
+                    return found
+            return None
+
+        win = walk(root)
+        if win is None:
+            d.close()
+            return None, None
+        return d, win
+    except Exception:
+        try:
+            d.close()
+        except Exception:
+            pass
+        return None, None
 
 
 def _draw_mem_bar(frame, rss_mb, peak_mb, warning=False):
@@ -59,7 +111,7 @@ class MainLoop:
         self._active_name = ""
         self._active_demo: Optional[Demo] = None
         self._running = False
-        self._frame_width = DISPLAY_W
+        self._frame_width = _FALLBACK_CONTENT_W
         self._shown_modes = []   # mode buttons currently displayed
         self._mode_row_h = MODE_ROW_HEIGHT  # always rendered
         self._bridge = bridge
@@ -68,6 +120,28 @@ class MainLoop:
         self._content_scale = 1.0
         self._content_pad_x = 0
         self._content_pad_y = 0
+        # X11 handles for live window-size tracking (filled in run()).
+        self._x_display = None
+        self._x_win = None
+
+    def _query_content_size(self) -> tuple:
+        """Return (content_w, content_h) from live X11 window geometry.
+
+        Falls back to the floor (_FALLBACK_CONTENT_W / _H) if the X11 lookup
+        failed at startup or a geometry query raises mid-loop. Always
+        clamps to the floor so the layout cannot collapse.
+        """
+        if self._x_win is None:
+            return _FALLBACK_CONTENT_W, _FALLBACK_CONTENT_H
+        try:
+            geom = self._x_win.get_geometry()
+            win_w, win_h = int(geom.width), int(geom.height)
+        except Exception:
+            return _FALLBACK_CONTENT_W, _FALLBACK_CONTENT_H
+        content_w = max(win_w, _FALLBACK_CONTENT_W)
+        content_h = max(win_h - TAB_BAR_HEIGHT - MODE_ROW_HEIGHT,
+                        _FALLBACK_CONTENT_H)
+        return content_w, content_h
 
     @property
     def _pen_down(self) -> bool:
@@ -83,16 +157,32 @@ class MainLoop:
         cv2.resizeWindow(WINDOW_NAME, DISPLAY_W, DISPLAY_H)
         cv2.setMouseCallback(WINDOW_NAME, self._mouse_callback)
 
+        # Force one imshow so the X11 window is realized before we look
+        # it up. Without this the window may not yet exist on the server.
+        cv2.imshow(WINDOW_NAME,
+                   np.full((DISPLAY_H, DISPLAY_W, 3), 240, dtype=np.uint8))
+        cv2.waitKey(1)
+
+        self._x_display, self._x_win = _find_x_window(WINDOW_NAME)
+        if self._x_win is None:
+            print("[WARN] X11 window lookup failed — "
+                  "canvas size will not track window resizes")
+        else:
+            print("[INIT] X11 window located — live resize tracking enabled")
+
         # Start on first tab
         self._switch_demo(self._demo_names[0])
         self._running = True
 
         while self._running:
+            content_w, content_h = self._query_content_size()
+            self._frame_width = content_w
+
             self._active_demo.process_frame(self._camera_mgr)
             frame = self._active_demo.render()
             frame, self._content_scale, self._content_pad_x, \
                 self._content_pad_y = normalize_frame(
-                    frame, DISPLAY_W, _CONTENT_H)
+                    frame, content_w, content_h)
 
             # Determine mode buttons for active demo
             outputs = self._active_demo._outputs
@@ -107,23 +197,23 @@ class MainLoop:
             arm_w = arm_buttons_width() if self._bridge else 0
             reserved_right = arm_w
 
-            # Compose tab bar (width always DISPLAY_W)
+            # Compose tab bar at current window width
             tabs = [(str(i + 1), name) for i, name in enumerate(self._demo_names)]
-            tab_bar = render_tab_bar(tabs, self._active_name, DISPLAY_W,
+            tab_bar = render_tab_bar(tabs, self._active_name, content_w,
                                      reserved_right=reserved_right)
             if arm_w > 0:
                 at_home = (self._arm_thread.at_home
                            if self._arm_thread else True)
                 arm_bar = render_arm_buttons(at_home, arm_w,
                                              pen_down=self._pen_down)
-                tab_bar[:, DISPLAY_W - arm_w:] = arm_bar
+                tab_bar[:, content_w - arm_w:] = arm_bar
 
             # Mode row — always rendered (empty gray bar when no modes)
             if self._shown_modes:
                 mode_row = render_mode_row(
-                    self._shown_modes, active_mode, available, DISPLAY_W)
+                    self._shown_modes, active_mode, available, content_w)
             else:
-                mode_row = render_mode_row([], None, set(), DISPLAY_W)
+                mode_row = render_mode_row([], None, set(), content_w)
             self._mode_row_h = mode_row.shape[0]  # always MODE_ROW_HEIGHT
             composed = np.vstack([tab_bar, mode_row, frame])
 
@@ -144,6 +234,11 @@ class MainLoop:
             self._active_demo.deactivate()
         self._camera_mgr.shutdown()
         cv2.destroyAllWindows()
+        if self._x_display is not None:
+            try:
+                self._x_display.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Key handling
