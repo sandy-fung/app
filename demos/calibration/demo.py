@@ -6,20 +6,27 @@ unified MainLoop (no separate window).
 Sub-tabs: Page Calibration (default) and Arm Calibration (when arm present).
 """
 
+import threading
 from typing import Optional
 
 import cv2
 import numpy as np
 
+from cv2_like_xe_sdk import dvs_normalize
+
 from app.config import DVS_WIDTH, DVS_HEIGHT, DVS_SCALE
 from app.core.demo import Demo
 from app.core.display import (
-    draw_hint_bar, resize_to_height,
+    draw_hint_bar, draw_hint_buttons, hint_button_from_click,
+    resize_to_height,
     render_sub_tab_bar, sub_tab_from_click, SUB_TAB_BAR_HEIGHT,
 )
 
 # Sub-tab definitions
-_SUB_TABS = [("page", "Page Cal"), ("arm", "Arm Cal")]
+_SUB_TABS = [("page", "Page Cal"), ("arm", "Arm Cal"), ("laser", "Laser Cal")]
+
+# DVS config mode toggle buttons
+_DVS_CFG_BTNS = [("dvs_only", "DVS Only"), ("hybrid", "Hybrid")]
 
 
 class CalibrationDemo(Demo):
@@ -42,16 +49,21 @@ class CalibrationDemo(Demo):
         self._rgb_cam_size: tuple = (640, 480)
         # Frames
         self._camera_mgr = None
-        self._dvs_panel_w = DVS_WIDTH * DVS_SCALE
-        self._dvs_panel_h = DVS_HEIGHT * DVS_SCALE
+        # Rotated space: width=DVS_HEIGHT, height=DVS_WIDTH
+        self._dvs_panel_w = DVS_HEIGHT * DVS_SCALE
+        self._dvs_panel_h = DVS_WIDTH * DVS_SCALE
 
-        # Sub-mode: "page" or "arm"
+        # Sub-mode: "page", "arm", or "laser"
         self._has_arm = bridge is not None and arm_thread is not None
         self._sub_mode = "page"
         self._arm_panel = None  # lazy ArmCalibrationPanel
+        self._laser_panel = None  # lazy LaserCalibrationPanel
         self._bridge = bridge
         self._arm_thread = arm_thread
         self._content_w = 0  # updated each render()
+        self._dvs_config_mode = "dvs_only"  # "dvs_only" or "hybrid"
+        self._hint_bar_h = 50  # matches draw_hint_bar default
+        self._page_w = 0  # actual composed width, updated each render
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -59,7 +71,10 @@ class CalibrationDemo(Demo):
 
     def activate(self, camera_mgr) -> None:
         self._camera_mgr = camera_mgr
-        camera_mgr.switch_dvs_to_hybrid()
+        if self._dvs_config_mode == "hybrid":
+            camera_mgr.switch_dvs_to_hybrid()
+        else:
+            camera_mgr.switch_dvs_to_tracking()
 
         # Lazy import (needs sys.path setup)
         from quad_calibrator import default_corners
@@ -116,6 +131,35 @@ class CalibrationDemo(Demo):
         # Nothing heavy to do; frames are read in render() for simplicity
         pass
 
+    def _grab_gray_safe(self, timeout: float = 2.0,
+                        max_retries: int = 3) -> Optional[np.ndarray]:
+        """Grab a gray frame with timeout to avoid XeGetFrame() hangs.
+
+        Runs grab_gray_frame() in a daemon thread so the main thread is
+        never blocked indefinitely after a DVS mode switch.
+        """
+        from quad_calibrator import grab_gray_frame
+
+        xe_cam = self._camera_mgr.xe_cam
+        for attempt in range(max_retries):
+            result = [None]
+
+            def _grab():
+                result[0] = grab_gray_frame(xe_cam)
+
+            t = threading.Thread(target=_grab, daemon=True)
+            t.start()
+            t.join(timeout=timeout)
+            if t.is_alive():
+                print(f"[CAL] WARNING: grab_gray_frame hung "
+                      f"(attempt {attempt + 1}/{max_retries})")
+                continue
+            return result[0]
+
+        print("[CAL] ERROR: grab_gray_frame failed after "
+              f"{max_retries} retries, returning black frame")
+        return None
+
     # ------------------------------------------------------------------
     # Render
     # ------------------------------------------------------------------
@@ -123,6 +167,8 @@ class CalibrationDemo(Demo):
     def render(self) -> np.ndarray:
         if self._has_arm and self._sub_mode == "arm":
             content = self._render_arm()
+        elif self._sub_mode == "laser":
+            content = self._render_laser()
         else:
             content = self._render_page()
 
@@ -137,23 +183,44 @@ class CalibrationDemo(Demo):
 
     def _available_sub_tabs(self) -> set:
         """Return the set of enabled sub-tab keys."""
-        avail = {"page"}
+        avail = {"page", "laser"}
         if self._has_arm:
             avail.add("arm")
         return avail
 
     def _render_page(self) -> np.ndarray:
         """Original page calibration render."""
-        from quad_calibrator import draw_overlay, grab_gray_frame
+        from quad_calibrator import draw_overlay
         from main_laser_drawing import draw_quad
 
         scale = DVS_SCALE
 
+        # Rotated dimensions: width=DVS_HEIGHT, height=DVS_WIDTH
+        rot_w, rot_h = DVS_HEIGHT, DVS_WIDTH
+
         # --- DVS panel ---
-        gray = grab_gray_frame(self._camera_mgr.xe_cam)
-        if gray is None:
-            gray = np.zeros((DVS_HEIGHT, DVS_WIDTH), dtype=np.uint8)
-        bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        if self._dvs_config_mode == "hybrid":
+            gray = self._grab_gray_safe()  # already rotated by grab_gray_frame
+            if gray is None:
+                gray = np.zeros((rot_h, rot_w), dtype=np.uint8)
+            bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        else:
+            # dvs_only — render like gesture display (full dynamic range)
+            xe = self._camera_mgr.xe_cam
+            dvs_raw, _ = xe.g_cap.XeGetFrame(
+                xe.g_xereal_mode, xe.g_xereal_bit_depth,
+            )
+            if dvs_raw is not None:
+                raw_2d = dvs_raw.reshape((DVS_HEIGHT, DVS_WIDTH))
+                gray = dvs_normalize(raw_2d, xe.g_xereal_bit_depth)
+                # Rotate to match read_dvs_frame convention
+                gray = cv2.rotate(gray, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                gray = cv2.flip(gray, 1)
+            else:
+                gray = None
+            if gray is None:
+                gray = np.zeros((rot_h, rot_w), dtype=np.uint8)
+            bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
         dvs_panel = cv2.resize(
             bgr, (self._dvs_panel_w, self._dvs_panel_h),
             interpolation=cv2.INTER_NEAREST,
@@ -185,6 +252,7 @@ class CalibrationDemo(Demo):
         sep = np.zeros((self._dvs_panel_h, 2, 3), dtype=np.uint8)
         self._rgb_panel_offset_x = self._dvs_panel_w + 2
         composed = np.hstack([dvs_panel, sep, rgb_panel])
+        self._page_w = composed.shape[1]
 
         # Hint bar at bottom
         dvs_ok = "OK" if self._store.dvs_calibrated else "--"
@@ -195,7 +263,9 @@ class CalibrationDemo(Demo):
         ]
         if self._has_arm:
             hints.append("[Tab] switch to Arm Cal")
-        draw_hint_bar(composed, hints)
+        self._hint_bar_h = draw_hint_bar(composed, hints)
+        draw_hint_buttons(composed, _DVS_CFG_BTNS, self._dvs_config_mode,
+                          bar_h=self._hint_bar_h)
 
         return composed
 
@@ -211,6 +281,17 @@ class CalibrationDemo(Demo):
         h = self._dvs_panel_h
         return self._arm_panel.render(w, h)
 
+    def _render_laser(self) -> np.ndarray:
+        """Render the laser calibration sub-panel."""
+        if self._laser_panel is None:
+            from app.demos.calibration.laser_panel import LaserCalibrationPanel
+            self._laser_panel = LaserCalibrationPanel(
+                self._camera_mgr, self._args, cal_store=self._store,
+            )
+
+        h = self._dvs_panel_h
+        return self._laser_panel.render(h)
+
     # ------------------------------------------------------------------
     # Key handling
     # ------------------------------------------------------------------
@@ -224,6 +305,11 @@ class CalibrationDemo(Demo):
         # Delegate to active sub-mode
         if self._has_arm and self._sub_mode == "arm":
             if self._arm_panel is not None and self._arm_panel.handle_key(key):
+                return True
+            return super().handle_key(key)
+
+        if self._sub_mode == "laser":
+            if self._laser_panel is not None and self._laser_panel.handle_key(key):
                 return True
             return super().handle_key(key)
 
@@ -281,6 +367,28 @@ class CalibrationDemo(Demo):
                 self._arm_panel.mouse_callback(event, x, y, flags, param)
             return
 
+        # Delegate to laser panel
+        if self._sub_mode == "laser":
+            if self._laser_panel is not None:
+                self._laser_panel.mouse_callback(event, x, y, flags, param)
+            return
+
+        # Page mode — check hint bar config buttons first
+        if event == cv2.EVENT_LBUTTONDOWN:
+            page_w = self._page_w or (self._dvs_panel_w * 2 + 2)  # fallback
+            clicked_cfg = hint_button_from_click(
+                x, y, page_w, self._dvs_panel_h,
+                _DVS_CFG_BTNS, bar_h=self._hint_bar_h,
+            )
+            if clicked_cfg is not None and clicked_cfg != self._dvs_config_mode:
+                self._dvs_config_mode = clicked_cfg
+                if clicked_cfg == "hybrid":
+                    self._camera_mgr.switch_dvs_to_hybrid()
+                else:
+                    self._camera_mgr.switch_dvs_to_tracking()
+                print(f"[CAL] DVS config -> {self._dvs_config_mode}")
+                return
+
         # Page mode — corner-drag logic for DVS (left) and RGB (right)
 
         # Global LBUTTONUP: reset drag state regardless of which panel the
@@ -305,8 +413,9 @@ class CalibrationDemo(Demo):
                     self._dragging_idx = idx
 
             elif event == cv2.EVENT_MOUSEMOVE and self._dragging_idx is not None:
-                nx = np.clip(x / scale, 0, DVS_WIDTH - 1)
-                ny = np.clip(y / scale, 0, DVS_HEIGHT - 1)
+                # Rotated space: w=DVS_HEIGHT, h=DVS_WIDTH
+                nx = np.clip(x / scale, 0, DVS_HEIGHT - 1)
+                ny = np.clip(y / scale, 0, DVS_WIDTH - 1)
                 self._dvs_corners[self._dragging_idx] = [nx, ny]
 
         elif x >= self._rgb_panel_offset_x and self._rgb_quad is not None:

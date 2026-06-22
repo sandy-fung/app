@@ -70,7 +70,7 @@ class TrackingDemo(Demo):
 
         # DVS tracker + background reader thread
         self._dvs_tracker = DVSLaserTracker(
-            width=DVS_WIDTH, height=DVS_HEIGHT,
+            width=DVS_HEIGHT, height=DVS_WIDTH,
             noise_mask_path=self._args.noise_mask,
         )
 

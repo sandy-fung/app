@@ -150,23 +150,37 @@ class HandThread:
             self._cleanup()
             self.is_running = False
 
+    _INIT_RETRIES = 3
+    _INIT_RETRY_DELAY = 2.0  # seconds between retries
+
     def _init_hand(self) -> None:
-        """Initialize LinkerHand SDK."""
+        """Initialize LinkerHand SDK with retries."""
         if self._hand_sdk_path:
             if self._hand_sdk_path not in sys.path:
                 sys.path.insert(0, self._hand_sdk_path)
 
         from LinkerHand.linker_hand_api import LinkerHandApi
 
-        print(f"[HAND] Initializing: joint={self._hand_joint}, "
-              f"type={self._hand_type}, can={self._can_name}")
-        self._hand = LinkerHandApi(
-            hand_joint=self._hand_joint,
-            hand_type=self._hand_type,
-            can=self._can_name,
-        )
-        self._hand.set_speed(speed=[255, 255, 255, 255, 255, 255])
-        print("[HAND] Ready!")
+        for attempt in range(1, self._INIT_RETRIES + 1):
+            try:
+                print(f"[HAND] Initializing (attempt {attempt}/{self._INIT_RETRIES}): "
+                      f"joint={self._hand_joint}, type={self._hand_type}, "
+                      f"can={self._can_name}")
+                self._hand = LinkerHandApi(
+                    hand_joint=self._hand_joint,
+                    hand_type=self._hand_type,
+                    can=self._can_name,
+                )
+                self._hand.set_speed(speed=[255, 255, 255, 255, 255, 255])
+                print("[HAND] Ready!")
+                return
+            except Exception as e:
+                print(f"[HAND] Init attempt {attempt} failed: {e}")
+                self._hand = None
+                if attempt < self._INIT_RETRIES:
+                    time.sleep(self._INIT_RETRY_DELAY)
+
+        raise RuntimeError(f"LinkerHand init failed after {self._INIT_RETRIES} attempts")
 
     def _consume_loop(self) -> None:
         while not self._stop_event.is_set():

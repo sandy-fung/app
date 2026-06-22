@@ -10,6 +10,7 @@ import traceback
 from collections import deque
 from typing import Optional, Tuple
 
+import cv2
 import numpy as np
 
 from app.core.inference.common import MajorityVoter
@@ -69,22 +70,35 @@ class RGBGestureThread:
 
     def _run(self) -> None:
         """Thread main loop."""
+        from app.config import RGB_DISPLAY_ROTATE
+
+        _ROTATE_FLAGS = {
+            90: cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+        }
+        rotate_flag = _ROTATE_FLAGS.get(RGB_DISPLAY_ROTATE)
+
         fps_window = 30
         fps_timestamps: deque[float] = deque(maxlen=fps_window)
 
         while not self._stop_event.is_set():
-            frame = self._camera_mgr.read_rgb_frame()
-            if frame is None:
+            # Read raw (unrotated) frame for inference accuracy
+            raw = self._camera_mgr.read_rgb_frame(rotate=False)
+            if raw is None:
                 time.sleep(0.001)
                 continue
 
-            # Inference
+            # Inference on original camera orientation
             try:
-                gesture, conf, elapsed = self._inference.predict(frame)
+                gesture, conf, elapsed = self._inference.predict(raw)
             except Exception as e:
                 print(f"[RGB_GEST] Inference error: {e}")
                 traceback.print_exc()
                 continue
+
+            # Rotate for display
+            display_frame = cv2.rotate(raw, rotate_flag) if rotate_flag is not None else raw
 
             # Vote
             now = time.perf_counter()
@@ -101,7 +115,7 @@ class RGBGestureThread:
 
             # Update snapshot
             with self._lock:
-                self._frame = frame
+                self._frame = display_frame
                 self._gesture = gesture
                 self._confidence = conf
                 self._stable = stable

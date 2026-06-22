@@ -42,10 +42,7 @@ DEFAULT_LASER_PROFILE = os.path.join(EX16_DIR, "laser_profile.json")
 # Gesture recognition constants
 # ---------------------------------------------------------------------------
 DVS_GESTURE_MODEL = (
-        #"/workspace/gest/xenreal_001d/gest/models/mwc_20260304_202806/mwc_20260304_202806/best_loss_model.pth"
-        # MWC final model
-        #"/workspace/gest/xenreal_001d/gest/models/dvs_20260305_115330/dvs_20260305_115330/best_loss_model.pth"
-        "/workspace/gest/xenreal_001d/gest/models/ew_20260309_194659/best_loss_model.pth"
+    "/workspace/gest/xenreal_001d/gest/models/dvs_20260223_105731/best_loss_model.pth"
 )
 MEDIAPIPE_MODEL = (
     "/workspace/gest/rgb/models/20260119_150909/gesture_recognizer.task"
@@ -53,11 +50,11 @@ MEDIAPIPE_MODEL = (
 HAND_SDK_PATH = "/workspace/gest/rgb"
 
 # Gesture inference defaults (hardcoded — no CLI)
-GESTURE_CONF = 0.85
+GESTURE_CONF = 0.5
 DVS_HOLD_FRAMES = 10
 RGB_HOLD_FRAMES = 2
 GESTURE_VOTE_MODE = "none"
-DVS_NORMALIZE_CENTER = 7
+DVS_NORMALIZE_CENTER = 9
 DVS_NORMALIZE_STEEPNESS = 3.0
 HAND_TYPE = "right"
 HAND_JOINT = "O6"

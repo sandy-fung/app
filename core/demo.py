@@ -91,7 +91,18 @@ class Demo(ABC):
         """Render demo output as BGR image."""
 
     def handle_key(self, key: int) -> bool:
-        """Handle keypress. Delegates to active output first."""
+        """Handle keypress. Delegates to active output first, then output mode switching."""
         if self.active_output and self.active_output.handle_key(key):
             return True
+        # Output mode switching (only for demos with registered outputs)
+        if self._outputs:
+            if key == ord('g'):
+                self.switch_output(OutputModeType.GUI)
+                return True
+            if key == ord('d'):
+                self.switch_output(OutputModeType.PHYS_DVS)
+                return True
+            if key == ord('r'):
+                self.switch_output(OutputModeType.PHYS_RGB)
+                return True
         return False
