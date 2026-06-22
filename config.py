@@ -14,6 +14,7 @@ EX17_DIR = os.path.join(PROJECT_ROOT, "examples", "ex17")
 SRC_DIR = os.path.join(PROJECT_ROOT, "src")
 XENREAL_SDK = "/workspace/xenreal_001d/src"
 XENREAL_ROOT = "/workspace/xenreal_001d"
+AUTO_EXPOSURE_ROOT = "/workspace/auto_exposure"
 
 # DVS sensor dimensions
 DVS_WIDTH = 164
@@ -29,9 +30,15 @@ DISPLAY_H = 768         # Total window height
 
 # DVS camera config files
 DVS_ONLY_CONFIG = (
-    "/workspace/xenreal_001d/ESC001D_DV_RAW4_200FPS_20260204_modify.cfg"
+        "/workspace/xenreal_001d/ESC001D_DV_RAW4_200FPS_20260204_modify.cfg"
 )
 HYBRID_CONFIG = "/workspace/xenreal_001d/ESC001D_2D_RAW8_DV_RAW2.cfg"
+
+# One-shot auto-exposure on entering Hybrid mode (calibration only).
+# Runs until converged or AE_MAX_FRAMES reached, then locks the resulting
+# exposure / gain into the sensor. AE instance is discarded after that.
+AE_TARGET_BRIGHTNESS = 110.0
+AE_MAX_FRAMES = 60
 
 # Default calibration / profile paths
 DEFAULT_DVS_CAL_PATH = os.path.join(EX15_DIR, "dvs_calibration.json")
@@ -42,7 +49,7 @@ DEFAULT_LASER_PROFILE = os.path.join(EX16_DIR, "laser_profile.json")
 # Gesture recognition constants
 # ---------------------------------------------------------------------------
 DVS_GESTURE_MODEL = (
-    "/workspace/gest/xenreal_001d/gest/models/dvs_20260223_105731/best_loss_model.pth"
+    "/workspace/gest/xenreal_001d/gest/models/dvs_weight/best_loss_model.pth"
 )
 MEDIAPIPE_MODEL = (
     "/workspace/gest/rgb/models/20260119_150909/gesture_recognizer.task"
@@ -50,7 +57,7 @@ MEDIAPIPE_MODEL = (
 HAND_SDK_PATH = "/workspace/gest/rgb"
 
 # Gesture inference defaults (hardcoded — no CLI)
-GESTURE_CONF = 0.5
+GESTURE_CONF = 0.8
 DVS_HOLD_FRAMES = 10
 RGB_HOLD_FRAMES = 2
 GESTURE_VOTE_MODE = "none"
@@ -67,7 +74,11 @@ GESTURE_ARRIVAL_POLL = 0.05      # poll interval in seconds
 
 def setup_sys_path() -> None:
     """Add required paths for importing existing modules."""
-    for p in [EX15_DIR, EX16_DIR, EX17_DIR, SRC_DIR, XENREAL_SDK, XENREAL_ROOT]:
+    # AUTO_EXPOSURE_ROOT is the package directory itself; add its parent so
+    # `import auto_exposure` resolves correctly.
+    ae_parent = os.path.dirname(AUTO_EXPOSURE_ROOT)
+    for p in [EX15_DIR, EX16_DIR, EX17_DIR, SRC_DIR, XENREAL_SDK, XENREAL_ROOT,
+              ae_parent]:
         if p not in sys.path:
             sys.path.insert(0, p)
 

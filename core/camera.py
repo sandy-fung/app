@@ -110,6 +110,43 @@ class CameraManager:
         self._xe_cam.CONFIG_ABS_PATH = HYBRID_CONFIG
         self._xe_cam.start_camera_laser()
         self._dvs_mode = "hybrid"
+        self._run_oneshot_ae()
+
+    def _run_oneshot_ae(self) -> None:
+        """Converge auto-exposure once, then leave settings locked in the sensor.
+
+        Runs after a hybrid-mode switch so the 2D preview is bright enough to
+        see in the current lighting. Bounded by AE_MAX_FRAMES to avoid hanging
+        if the scene never converges (e.g. fully dark or clipped). Failures
+        are logged but non-fatal — the user still gets the un-adjusted frame.
+        """
+        from app.config import (
+            AE_MAX_FRAMES,
+            AE_TARGET_BRIGHTNESS,
+        )
+
+        try:
+            from auto_exposure import AEConfig, AutoExposure
+        except Exception as exc:
+            print(f"[CAM] one-shot AE skipped: import failed ({exc})")
+            return
+
+        xe = self._xe_cam
+        cap = xe.g_cap
+        ae = AutoExposure(cap, AEConfig(target_brightness=AE_TARGET_BRIGHTNESS))
+
+        for i in range(AE_MAX_FRAMES):
+            _dvs, gray = cap.XeGetFrame(xe.g_xereal_mode, xe.g_xereal_bit_depth)
+            if gray is None:
+                continue
+            state = ae.update(gray)
+            if state.converged:
+                print(f"[CAM] one-shot AE converged in {i + 1} frames: "
+                      f"expo={state.exposure}, gain=0x{state.gain_index:02X}, "
+                      f"brt={state.brightness:.1f}")
+                return
+        print(f"[CAM] one-shot AE hit frame limit ({AE_MAX_FRAMES}) without "
+              f"converging; current brt={ae.state.brightness:.1f}")
 
     def switch_dvs_to_tracking(self) -> None:
         """Switch DVS to DVS-only tracking mode (~200fps)."""
